@@ -204,23 +204,45 @@ async function answerCallback(env, callback_query_id, text = "") {
   return tg(env, "answerCallbackQuery", { callback_query_id, text });
 }
 
+function detectAudioFormat(buf) {
+  const b = new Uint8Array(buf, 0, Math.min(4, buf.byteLength));
+  // MP3: sync word ff fb / ff f3 / ff f2, or ID3 tag
+  if ((b[0] === 0xff && (b[1] & 0xe0) === 0xe0) ||
+      (b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x44)) return "mp3";
+  // WAV: RIFF....WAVE
+  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46) return "wav";
+  return "unknown";
+}
+
 async function sendVoice(env, chat_id, audioUrl, caption, extra = {}) {
   const audioResp = await fetch(audioUrl);
   if (!audioResp.ok) throw new Error(`Audio fetch failed: ${audioResp.status}`);
-  const wavBuffer = await audioResp.arrayBuffer();
+  const audioBuffer = await audioResp.arrayBuffer();
 
-  const oggBytes = wavToOggOpus(wavBuffer);
-
+  const fmt = detectAudioFormat(audioBuffer);
   const form = new FormData();
   form.append("chat_id", String(chat_id));
   form.append("caption", caption);
   form.append("parse_mode", "Markdown");
-  form.append("voice", new Blob([oggBytes], { type: "audio/ogg" }), "voice.ogg");
   if (extra.reply_markup) {
     form.append("reply_markup", JSON.stringify(extra.reply_markup));
   }
 
-  const r = await fetch(`${TG_API}/bot${env.BOT_TOKEN}/sendVoice`, {
+  let method;
+  if (fmt === "wav") {
+    // Convert WAV → OGG Opus for Telegram voice message
+    const oggBytes = wavToOggOpus(audioBuffer);
+    form.append("voice", new Blob([oggBytes], { type: "audio/ogg" }), "voice.ogg");
+    method = "sendVoice";
+  } else {
+    // MP3 or unknown — send as audio file; Telegram accepts MP3 natively
+    const mimeType = fmt === "mp3" ? "audio/mpeg" : "application/octet-stream";
+    const fileName = fmt === "mp3" ? "audio.mp3" : "audio.bin";
+    form.append("audio", new Blob([audioBuffer], { type: mimeType }), fileName);
+    method = "sendAudio";
+  }
+
+  const r = await fetch(`${TG_API}/bot${env.BOT_TOKEN}/${method}`, {
     method: "POST",
     body: form,
   });
