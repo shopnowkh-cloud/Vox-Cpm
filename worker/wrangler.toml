@@ -1,6 +1,7 @@
 name = "voxcpm2-bot"
 main = "src/index.js"
 compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
 account_id = "d8849271816bf8825908efa8edc58162"
 
 [[kv_namespaces]]

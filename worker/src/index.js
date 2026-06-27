@@ -1,5 +1,143 @@
+import OpusScript from "opusscript";
+
 const TG_API = "https://api.telegram.org";
 const HF_SPACE = "https://openbmb-voxcpm-demo.hf.space";
+
+// ── WAV → OGG Opus conversion ─────────────────────────────────────────────────
+
+function parseWav(buf) {
+  const v = new DataView(buf);
+  const numChannels = v.getInt16(22, true);
+  const sampleRate = v.getUint32(24, true);
+  const bitsPerSample = v.getInt16(34, true);
+  let off = 12;
+  while (off < buf.byteLength - 8) {
+    const id = String.fromCharCode(v.getUint8(off), v.getUint8(off+1), v.getUint8(off+2), v.getUint8(off+3));
+    const size = v.getUint32(off + 4, true);
+    if (id === "data") return { sampleRate, numChannels, bitsPerSample, dataOffset: off + 8, dataSize: size };
+    off += 8 + size;
+  }
+  throw new Error("WAV data chunk not found");
+}
+
+function toMono48kFloat32(buf, { sampleRate, numChannels, bitsPerSample, dataOffset, dataSize }) {
+  const n = dataSize / (bitsPerSample / 8);
+  const int16 = new Int16Array(buf, dataOffset, n);
+  const frames = n / numChannels;
+
+  // Mix to mono Float32
+  const mono = new Float32Array(frames);
+  for (let i = 0; i < frames; i++) {
+    let s = 0;
+    for (let c = 0; c < numChannels; c++) s += int16[i * numChannels + c];
+    mono[i] = s / numChannels / 32768;
+  }
+
+  if (sampleRate === 48000) return mono;
+
+  // Linear resample to 48kHz
+  const ratio = sampleRate / 48000;
+  const out = new Float32Array(Math.ceil(frames / ratio));
+  for (let i = 0; i < out.length; i++) {
+    const src = i * ratio;
+    const lo = Math.floor(src), hi = Math.min(lo + 1, frames - 1);
+    out[i] = mono[lo] * (1 - (src - lo)) + mono[hi] * (src - lo);
+  }
+  return out;
+}
+
+// OGG CRC32 (poly 0x04C11DB7, non-reflected)
+const OGG_CRC = (() => {
+  const t = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let h = i << 24;
+    for (let j = 0; j < 8; j++) h = (h & 0x80000000) ? ((h << 1) ^ 0x04c11db7) : (h << 1);
+    t[i] = h >>> 0;
+  }
+  return t;
+})();
+
+function oggCrc32(data) {
+  let crc = 0;
+  for (let i = 0; i < data.length; i++) crc = (((crc << 8) ^ OGG_CRC[((crc >>> 24) ^ data[i]) & 0xff]) >>> 0);
+  return crc;
+}
+
+function oggPage(flags, granule, serial, seq, packets) {
+  const segs = [];
+  for (const p of packets) { let r = p.length; while (r >= 255) { segs.push(255); r -= 255; } segs.push(r); }
+  const dataLen = packets.reduce((s, p) => s + p.length, 0);
+  const hLen = 27 + segs.length;
+  const page = new Uint8Array(hLen + dataLen);
+  const v = new DataView(page.buffer);
+  page[0]=79; page[1]=103; page[2]=103; page[3]=83; // OggS
+  page[4]=0; page[5]=flags;
+  v.setUint32(6, granule >>> 0, true);
+  v.setUint32(10, Math.floor(granule / 0x100000000) >>> 0, true);
+  v.setUint32(14, serial >>> 0, true);
+  v.setUint32(18, seq >>> 0, true);
+  v.setUint32(22, 0, true); // checksum placeholder
+  page[26] = segs.length;
+  segs.forEach((s, i) => { page[27 + i] = s; });
+  let off = hLen;
+  for (const p of packets) { page.set(p, off); off += p.length; }
+  v.setUint32(22, oggCrc32(page), true);
+  return page;
+}
+
+function opusHead(channels, origRate) {
+  const b = new Uint8Array(19);
+  const v = new DataView(b.buffer);
+  b.set([79,112,117,115,72,101,97,100], 0); // OpusHead
+  b[8]=1; b[9]=channels;
+  v.setUint16(10, 312, true); // pre-skip
+  v.setUint32(12, origRate, true);
+  v.setInt16(16, 0, true); b[18]=0;
+  return b;
+}
+
+function opusTags() {
+  const enc = new TextEncoder(), v = enc.encode("VoxCPM2Bot");
+  const b = new Uint8Array(8 + 4 + v.length + 4);
+  const dv = new DataView(b.buffer);
+  b.set(enc.encode("OpusTags"), 0);
+  dv.setUint32(8, v.length, true); b.set(v, 12);
+  dv.setUint32(12 + v.length, 0, true);
+  return b;
+}
+
+function wavToOggOpus(wavBuffer) {
+  const info = parseWav(wavBuffer);
+  const pcm = toMono48kFloat32(wavBuffer, info);
+  const encoder = new OpusScript(48000, 1, OpusScript.Application.AUDIO);
+
+  const FRAME = 960; // 20ms @ 48kHz
+  const PRE_SKIP = 312;
+  const serial = (Math.random() * 0x7fffffff) | 0;
+  let seq = 0, granule = 0;
+  const pages = [];
+
+  pages.push(oggPage(0x02, 0, serial, seq++, [opusHead(1, info.sampleRate)]));
+  pages.push(oggPage(0x00, 0, serial, seq++, [opusTags()]));
+
+  for (let offset = 0; offset < pcm.length; offset += FRAME) {
+    const chunk = new Float32Array(FRAME);
+    chunk.set(pcm.subarray(offset, offset + FRAME));
+    const pcm16 = new Int16Array(FRAME);
+    for (let i = 0; i < FRAME; i++) pcm16[i] = Math.max(-32768, Math.min(32767, (chunk[i] * 32767) | 0));
+    granule += FRAME;
+    const isLast = offset + FRAME >= pcm.length;
+    const encoded = encoder.encode(Buffer.from(pcm16.buffer), FRAME);
+    pages.push(oggPage(isLast ? 0x04 : 0x00, granule + PRE_SKIP, serial, seq++, [encoded]));
+  }
+
+  encoder.delete();
+  const total = pages.reduce((s, p) => s + p.length, 0);
+  const out = new Uint8Array(total);
+  let pos = 0;
+  for (const p of pages) { out.set(p, pos); pos += p.length; }
+  return out;
+}
 
 // ── Telegram helpers ──────────────────────────────────────────────────────────
 async function tg(env, method, body) {
@@ -26,21 +164,22 @@ async function answerCallback(env, callback_query_id, text = "") {
 }
 
 async function sendVoice(env, chat_id, audioUrl, caption, extra = {}) {
-  // Fetch WAV directly from HuggingFace and send as audio file
   const audioResp = await fetch(audioUrl);
   if (!audioResp.ok) throw new Error(`Audio fetch failed: ${audioResp.status}`);
-  const wavBytes = await audioResp.arrayBuffer();
+  const wavBuffer = await audioResp.arrayBuffer();
+
+  const oggBytes = wavToOggOpus(wavBuffer);
 
   const form = new FormData();
   form.append("chat_id", String(chat_id));
   form.append("caption", caption);
   form.append("parse_mode", "Markdown");
-  form.append("audio", new Blob([wavBytes], { type: "audio/wav" }), "voice.wav");
+  form.append("voice", new Blob([oggBytes], { type: "audio/ogg" }), "voice.ogg");
   if (extra.reply_markup) {
     form.append("reply_markup", JSON.stringify(extra.reply_markup));
   }
 
-  const r = await fetch(`${TG_API}/bot${env.BOT_TOKEN}/sendAudio`, {
+  const r = await fetch(`${TG_API}/bot${env.BOT_TOKEN}/sendVoice`, {
     method: "POST",
     body: form,
   });
