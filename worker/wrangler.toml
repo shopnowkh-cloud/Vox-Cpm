@@ -1,0 +1,8 @@
+name = "voxcpm2-bot"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+account_id = "d8849271816bf8825908efa8edc58162"
+
+[[kv_namespaces]]
+binding = "BOT_KV"
+id = "5e0fc5717c684f97b17f0e184ad962dc"
