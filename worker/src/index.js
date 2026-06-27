@@ -230,7 +230,7 @@ async function processUpdate(env, update) {
     if (data === "back_menu" || data === "regen") {
       await clearState(env, userId);
       await editMessage(env, chatId, msgId,
-        "🏠 *Main Menu*\n\nជ្រើសរើស មុខងារ ដែលចង់ប្រើ:",
+        "👋 ស្វាគមន៍មកកាន់ VoxCPM2 Bot!\n\n🌍 AI Text-to-Speech — 30 ភាសា\nជ្រើសរើស មុខងារ ដែលចង់ប្រើ:",
         { reply_markup: MAIN_MENU_KB }
       );
       return;
@@ -411,7 +411,7 @@ async function processUpdate(env, update) {
   // ── Default: show menu ──────────────────────────────────────────────────────
   await clearState(env, userId);
   await sendMessage(env, chatId,
-    "🏠 *Main Menu*\n\nជ្រើសរើស មុខងារ ដែលចង់ប្រើ:",
+    "👋 ស្វាគមន៍មកកាន់ VoxCPM2 Bot!\n\n🌍 AI Text-to-Speech — 30 ភាសា\nជ្រើសរើស មុខងារ ដែលចង់ប្រើ:",
     { reply_markup: MAIN_MENU_KB }
   );
 }
