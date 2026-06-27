@@ -186,67 +186,76 @@ router.get("/tts/models", (_req, res): void => {
 });
 
 router.post("/tts/synthesize", async (req, res): Promise<void> => {
-  // Verify Cloudflare Turnstile
-  const turnstileToken = req.body?.cf_turnstile_token as string | undefined;
-  if (!turnstileToken) {
-    res.status(403).json({ error: "ការផ្ទៀងផ្ទាត់សុវត្ថិភាពត្រូវបានទាមទារ" });
-    return;
+  try {
+    // Skip Turnstile when no secret key is configured (Replit / local dev).
+    // When TURNSTILE_SECRET_KEY is set (Cloudflare production), verify normally.
+    const secretKey = process.env.TURNSTILE_SECRET_KEY;
+    if (secretKey) {
+      const turnstileToken = req.body?.cf_turnstile_token as string | undefined;
+      if (!turnstileToken) {
+        res.status(403).json({ error: "ការផ្ទៀងផ្ទាត់សុវត្ថិភាពត្រូវបានទាមទារ" });
+        return;
+      }
+      const valid = await verifyTurnstile(turnstileToken, secretKey);
+      if (!valid) {
+        res.status(403).json({ error: "ការផ្ទៀងផ្ទាត់ Cloudflare បរាជ័យ — សូមព្យាយាមម្ដងទៀត" });
+        return;
+      }
+    }
+
+    const parsed = SynthesizeSpeechBody.safeParse(req.body);
+    if (!parsed.success) {
+      req.log.warn({ errors: parsed.error.message }, "Invalid TTS request body");
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+
+    const {
+      text,
+      control_instruction = "",
+      reference_audio_base64 = null,
+      reference_audio_name = null,
+      use_prompt_text = false,
+      prompt_text = "",
+      cfg_value = 2.0,
+      do_normalize = false,
+      denoise = false,
+    } = parsed.data;
+
+    req.log.info(
+      { textLength: text.length, hasReference: !!reference_audio_base64 },
+      "Synthesizing via VoxCPM2 (HuggingFace)"
+    );
+
+    let referencePath: string | null = null;
+    if (reference_audio_base64) {
+      const filename = reference_audio_name ?? "reference.wav";
+      referencePath = await uploadAudioToGradio(reference_audio_base64, filename);
+      req.log.info({ referencePath }, "Reference audio uploaded to HF");
+    }
+
+    const audioBuffer = await callGradioGenerate({
+      text,
+      control_instruction,
+      reference_path: referencePath,
+      use_prompt_text,
+      prompt_text,
+      cfg_value,
+      do_normalize,
+      denoise,
+    });
+
+    req.log.info({ bytes: audioBuffer.byteLength }, "VoxCPM2 synthesis complete");
+
+    res.set("Content-Type", "audio/wav");
+    res.set("Content-Length", String(audioBuffer.byteLength));
+    res.set("Cache-Control", "no-store");
+    res.send(Buffer.from(audioBuffer));
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    req.log.error({ err }, "TTS synthesis failed");
+    res.status(500).json({ error: message });
   }
-  const secretKey = process.env.TURNSTILE_SECRET_KEY ?? TURNSTILE_TEST_SECRET;
-  const valid = await verifyTurnstile(turnstileToken, secretKey);
-  if (!valid) {
-    res.status(403).json({ error: "ការផ្ទៀងផ្ទាត់ Cloudflare បរាជ័យ — សូមព្យាយាមម្ដងទៀត" });
-    return;
-  }
-
-  const parsed = SynthesizeSpeechBody.safeParse(req.body);
-  if (!parsed.success) {
-    req.log.warn({ errors: parsed.error.message }, "Invalid TTS request body");
-    res.status(400).json({ error: parsed.error.message });
-    return;
-  }
-
-  const {
-    text,
-    control_instruction = "",
-    reference_audio_base64 = null,
-    reference_audio_name = null,
-    use_prompt_text = false,
-    prompt_text = "",
-    cfg_value = 2.0,
-    do_normalize = false,
-    denoise = false,
-  } = parsed.data;
-
-  req.log.info(
-    { textLength: text.length, hasReference: !!reference_audio_base64 },
-    "Synthesizing via VoxCPM2 (HuggingFace)"
-  );
-
-  let referencePath: string | null = null;
-  if (reference_audio_base64) {
-    const filename = reference_audio_name ?? "reference.wav";
-    referencePath = await uploadAudioToGradio(reference_audio_base64, filename);
-    req.log.info({ referencePath }, "Reference audio uploaded to HF");
-  }
-
-  const audioBuffer = await callGradioGenerate({
-    text,
-    control_instruction,
-    reference_path: referencePath,
-    use_prompt_text,
-    prompt_text,
-    cfg_value,
-    do_normalize,
-    denoise,
-  });
-
-  req.log.info({ bytes: audioBuffer.byteLength }, "VoxCPM2 synthesis complete");
-
-  res.set("Content-Type", "audio/wav");
-  res.set("Content-Length", String(audioBuffer.byteLength));
-  res.set("Cache-Control", "no-store");
-  res.send(Buffer.from(audioBuffer));
 });
 
 export default router;
