@@ -7,30 +7,67 @@ const HF_SPACE = "https://openbmb-voxcpm-demo.hf.space";
 
 function parseWav(buf) {
   const v = new DataView(buf);
-  const numChannels = v.getInt16(22, true);
-  const sampleRate = v.getUint32(24, true);
-  const bitsPerSample = v.getInt16(34, true);
-  let off = 12;
-  while (off < buf.byteLength - 8) {
-    const id = String.fromCharCode(v.getUint8(off), v.getUint8(off+1), v.getUint8(off+2), v.getUint8(off+3));
-    const size = v.getUint32(off + 4, true);
-    if (id === "data") return { sampleRate, numChannels, bitsPerSample, dataOffset: off + 8, dataSize: size };
-    off += 8 + size;
+  const bytes = new Uint8Array(buf);
+
+  // Verify RIFF/WAVE magic
+  const riff = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
+  const wave = String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]);
+  if (riff !== "RIFF" || wave !== "WAVE") {
+    const preview = Array.from(bytes.slice(0, 16)).map(b => b.toString(16).padStart(2,"0")).join(" ");
+    throw new Error(`Not a WAV file (bytes: ${preview})`);
   }
-  throw new Error("WAV data chunk not found");
+
+  // Walk all chunks to find fmt and data
+  let audioFormat = 1, numChannels = 1, sampleRate = 48000, bitsPerSample = 16;
+  let dataOffset = null, dataSize = null;
+  let off = 12;
+
+  while (off + 8 <= buf.byteLength) {
+    const id = String.fromCharCode(bytes[off], bytes[off+1], bytes[off+2], bytes[off+3]);
+    const size = v.getUint32(off + 4, true);
+
+    if (id === "fmt ") {
+      audioFormat  = v.getUint16(off + 8,  true); // 1=PCM int, 3=IEEE float
+      numChannels  = v.getUint16(off + 10, true);
+      sampleRate   = v.getUint32(off + 12, true);
+      bitsPerSample = v.getUint16(off + 22, true);
+    } else if (id === "data") {
+      dataOffset = off + 8;
+      dataSize   = size;
+      break;
+    }
+
+    // Chunks are padded to 2-byte boundaries
+    off += 8 + size + (size & 1);
+  }
+
+  if (dataOffset === null) throw new Error("WAV data chunk not found");
+  return { audioFormat, sampleRate, numChannels, bitsPerSample, dataOffset, dataSize };
 }
 
-function toMono48kFloat32(buf, { sampleRate, numChannels, bitsPerSample, dataOffset, dataSize }) {
-  const n = dataSize / (bitsPerSample / 8);
-  const int16 = new Int16Array(buf, dataOffset, n);
-  const frames = n / numChannels;
+function toMono48kFloat32(buf, { audioFormat, sampleRate, numChannels, bitsPerSample, dataOffset, dataSize }) {
+  const v = new DataView(buf);
+  const bytesPerSample = bitsPerSample / 8;
+  const totalSamples = Math.floor(dataSize / bytesPerSample);
+  const frames = Math.floor(totalSamples / numChannels);
 
-  // Mix to mono Float32
+  // Convert to mono Float32
   const mono = new Float32Array(frames);
   for (let i = 0; i < frames; i++) {
     let s = 0;
-    for (let c = 0; c < numChannels; c++) s += int16[i * numChannels + c];
-    mono[i] = s / numChannels / 32768;
+    for (let c = 0; c < numChannels; c++) {
+      const o = dataOffset + (i * numChannels + c) * bytesPerSample;
+      if (audioFormat === 3) {
+        s += v.getFloat32(o, true);             // IEEE float32
+      } else if (bitsPerSample === 16) {
+        s += v.getInt16(o, true) / 32768;       // PCM 16-bit
+      } else if (bitsPerSample === 32) {
+        s += v.getInt32(o, true) / 2147483648;  // PCM 32-bit int
+      } else if (bitsPerSample === 8) {
+        s += (v.getUint8(o) - 128) / 128;       // PCM 8-bit
+      }
+    }
+    mono[i] = s / numChannels;
   }
 
   if (sampleRate === 48000) return mono;
