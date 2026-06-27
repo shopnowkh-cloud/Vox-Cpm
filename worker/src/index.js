@@ -26,23 +26,21 @@ async function answerCallback(env, callback_query_id, text = "") {
 }
 
 async function sendVoice(env, chat_id, audioUrl, caption, extra = {}) {
-  // Step 1: Convert WAV → OGG Opus via Replit converter service
-  const convertUrl = `${env.CONVERTER_URL}/convert?url=${encodeURIComponent(audioUrl)}`;
-  const convertResp = await fetch(convertUrl);
-  if (!convertResp.ok) throw new Error(`Converter failed: ${convertResp.status}`);
-  const oggBytes = await convertResp.arrayBuffer();
+  // Fetch WAV directly from HuggingFace and send as audio file
+  const audioResp = await fetch(audioUrl);
+  if (!audioResp.ok) throw new Error(`Audio fetch failed: ${audioResp.status}`);
+  const wavBytes = await audioResp.arrayBuffer();
 
-  // Step 2: Upload OGG Opus to Telegram as voice message
   const form = new FormData();
   form.append("chat_id", String(chat_id));
   form.append("caption", caption);
   form.append("parse_mode", "Markdown");
-  form.append("voice", new Blob([oggBytes], { type: "audio/ogg" }), "voice.ogg");
+  form.append("audio", new Blob([wavBytes], { type: "audio/wav" }), "voice.wav");
   if (extra.reply_markup) {
     form.append("reply_markup", JSON.stringify(extra.reply_markup));
   }
 
-  const r = await fetch(`${TG_API}/bot${env.BOT_TOKEN}/sendVoice`, {
+  const r = await fetch(`${TG_API}/bot${env.BOT_TOKEN}/sendAudio`, {
     method: "POST",
     body: form,
   });
