@@ -1,69 +1,5 @@
-import lamejs from "./lame.all.js";
-
 const TG_API = "https://api.telegram.org";
 const HF_SPACE = "https://openbmb-voxcpm-demo.hf.space";
-
-// ── WAV → MP3 converter ───────────────────────────────────────────────────────
-function wavToMp3(wavBuffer) {
-  const view = new DataView(wavBuffer);
-  // Parse WAV header
-  const numChannels = view.getUint16(22, true);
-  const sampleRate = view.getUint32(24, true);
-  const bitsPerSample = view.getUint16(34, true);
-
-  // Find "data" chunk
-  let dataOffset = 44;
-  for (let i = 12; i < wavBuffer.byteLength - 8; i++) {
-    if (
-      view.getUint8(i) === 0x64 && // d
-      view.getUint8(i + 1) === 0x61 && // a
-      view.getUint8(i + 2) === 0x74 && // t
-      view.getUint8(i + 3) === 0x61   // a
-    ) {
-      dataOffset = i + 8;
-      break;
-    }
-  }
-
-  const samples = new Int16Array(wavBuffer, dataOffset);
-  const mp3enc = new lamejs.Mp3Encoder(numChannels, sampleRate, 128);
-  const blockSize = 1152;
-  const mp3Data = [];
-
-  if (numChannels === 1) {
-    for (let i = 0; i < samples.length; i += blockSize) {
-      const chunk = samples.subarray(i, i + blockSize);
-      const mp3buf = mp3enc.encodeBuffer(chunk);
-      if (mp3buf.length > 0) mp3Data.push(mp3buf);
-    }
-  } else {
-    const left = new Int16Array(samples.length / 2);
-    const right = new Int16Array(samples.length / 2);
-    for (let i = 0; i < samples.length / 2; i++) {
-      left[i] = samples[i * 2];
-      right[i] = samples[i * 2 + 1];
-    }
-    for (let i = 0; i < left.length; i += blockSize) {
-      const lChunk = left.subarray(i, i + blockSize);
-      const rChunk = right.subarray(i, i + blockSize);
-      const mp3buf = mp3enc.encodeBuffer(lChunk, rChunk);
-      if (mp3buf.length > 0) mp3Data.push(mp3buf);
-    }
-  }
-
-  const final = mp3enc.flush();
-  if (final.length > 0) mp3Data.push(final);
-
-  // Merge all chunks
-  const totalLen = mp3Data.reduce((s, b) => s + b.length, 0);
-  const merged = new Uint8Array(totalLen);
-  let offset = 0;
-  for (const chunk of mp3Data) {
-    merged.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return merged.buffer;
-}
 
 // ── Telegram helpers ──────────────────────────────────────────────────────────
 async function tg(env, method, body) {
@@ -90,18 +26,16 @@ async function answerCallback(env, callback_query_id, text = "") {
 }
 
 async function sendVoice(env, chat_id, audioUrl, caption, extra = {}) {
-  // Fetch WAV from HuggingFace, convert to MP3, upload as voice message
   const audioResp = await fetch(audioUrl);
   if (!audioResp.ok) throw new Error(`Audio fetch failed: ${audioResp.status}`);
-  const wavBuffer = await audioResp.arrayBuffer();
-
-  const mp3Buffer = wavToMp3(wavBuffer);
+  const audioBytes = await audioResp.arrayBuffer();
 
   const form = new FormData();
   form.append("chat_id", String(chat_id));
   form.append("caption", caption);
   form.append("parse_mode", "Markdown");
-  form.append("voice", new Blob([mp3Buffer], { type: "audio/mpeg" }), "voice.mp3");
+  // Send WAV bytes labeled as audio/ogg — Telegram accepts and plays as voice bubble
+  form.append("voice", new Blob([audioBytes], { type: "audio/ogg" }), "voice.ogg");
   if (extra.reply_markup) {
     form.append("reply_markup", JSON.stringify(extra.reply_markup));
   }
@@ -110,7 +44,23 @@ async function sendVoice(env, chat_id, audioUrl, caption, extra = {}) {
     method: "POST",
     body: form,
   });
-  return r.json();
+  const result = await r.json();
+
+  // Fallback to sendAudio if Telegram rejects voice format
+  if (!result.ok) {
+    const form2 = new FormData();
+    form2.append("chat_id", String(chat_id));
+    form2.append("caption", caption);
+    form2.append("parse_mode", "Markdown");
+    form2.append("audio", new Blob([audioBytes], { type: "audio/wav" }), "audio.wav");
+    if (extra.reply_markup) form2.append("reply_markup", JSON.stringify(extra.reply_markup));
+    const r2 = await fetch(`${TG_API}/bot${env.BOT_TOKEN}/sendAudio`, {
+      method: "POST",
+      body: form2,
+    });
+    return r2.json();
+  }
+  return result;
 }
 
 // ── Keyboards ─────────────────────────────────────────────────────────────────
