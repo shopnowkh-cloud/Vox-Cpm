@@ -5,7 +5,8 @@
  * VoxCPM TTS API powered by Cloudflare Workers AI
  * OpenAPI spec version: 0.1.0
  */
+import type { TtsModel } from './ttsModel';
 
-export interface HealthStatus {
-  status: string;
+export interface TtsModels {
+  models: TtsModel[];
 }
