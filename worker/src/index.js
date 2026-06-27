@@ -1,4 +1,4 @@
-import lamejs from "lamejs";
+import lamejs from "./lame.all.js";
 
 const TG_API = "https://api.telegram.org";
 const HF_SPACE = "https://openbmb-voxcpm-demo.hf.space";
