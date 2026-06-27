@@ -59,11 +59,10 @@ async def call_voxcpm_api(
             "control_instruction": control,
             "reference_wav_path_input": handle_file(ref_wav_path) if ref_wav_path else None,
             "use_prompt_text": use_prompt_text,
-            "prompt_text": prompt_text,
+            "prompt_text_input": prompt_text,
             "cfg_value_input": 2.0,
             "do_normalize": False,
             "denoise": False,
-            "dit_steps": 10,
             "api_name": "/generate",
         }
 
