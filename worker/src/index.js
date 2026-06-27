@@ -26,24 +26,41 @@ async function answerCallback(env, callback_query_id, text = "") {
 }
 
 async function sendVoice(env, chat_id, audioUrl, caption, extra = {}) {
-  const audioResp = await fetch(audioUrl);
-  if (!audioResp.ok) throw new Error(`Failed to fetch audio: ${audioResp.status}`);
-  const audioBytes = await audioResp.arrayBuffer();
-
-  const form = new FormData();
-  form.append("chat_id", String(chat_id));
-  form.append("caption", caption);
-  form.append("parse_mode", "Markdown");
-  form.append("voice", new Blob([audioBytes], { type: "audio/ogg" }), "voice.ogg");
-  if (extra.reply_markup) {
-    form.append("reply_markup", JSON.stringify(extra.reply_markup));
-  }
-
+  // Pass URL directly — Telegram downloads and converts the audio server-side
+  const body = {
+    chat_id,
+    voice: audioUrl,
+    caption,
+    parse_mode: "Markdown",
+    ...extra,
+  };
   const r = await fetch(`${TG_API}/bot${env.BOT_TOKEN}/sendVoice`, {
     method: "POST",
-    body: form,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
-  return r.json();
+  const result = await r.json();
+
+  // Fallback: if Telegram rejects the voice format, upload raw bytes
+  if (!result.ok) {
+    const audioResp = await fetch(audioUrl);
+    if (!audioResp.ok) throw new Error(`Audio fetch failed: ${audioResp.status}`);
+    const audioBytes = await audioResp.arrayBuffer();
+    const form = new FormData();
+    form.append("chat_id", String(chat_id));
+    form.append("caption", caption);
+    form.append("parse_mode", "Markdown");
+    form.append("voice", new Blob([audioBytes], { type: "audio/wav" }), "voice.wav");
+    if (extra.reply_markup) {
+      form.append("reply_markup", JSON.stringify(extra.reply_markup));
+    }
+    const r2 = await fetch(`${TG_API}/bot${env.BOT_TOKEN}/sendVoice`, {
+      method: "POST",
+      body: form,
+    });
+    return r2.json();
+  }
+  return result;
 }
 
 // ── Keyboards ─────────────────────────────────────────────────────────────────
