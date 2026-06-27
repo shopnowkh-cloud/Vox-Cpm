@@ -153,6 +153,10 @@ async function sendMessage(env, chat_id, text, extra = {}) {
   return tg(env, "sendMessage", { chat_id, text, parse_mode: "Markdown", ...extra });
 }
 
+async function sendSticker(env, chat_id, sticker) {
+  return tg(env, "sendSticker", { chat_id, sticker });
+}
+
 async function editMessage(env, chat_id, message_id, text, extra = {}) {
   return tg(env, "editMessageText", {
     chat_id, message_id, text, parse_mode: "Markdown", ...extra,
@@ -408,8 +412,8 @@ async function processUpdate(env, update) {
 
   // ── Voice Design: waiting for text ─────────────────────────────────────────
   if (state.step === "design_text" && text) {
-    const status = await sendMessage(env, chatId,
-      "⏳ *Voice Design* — កំពុង generate audio..."
+    const status = await sendSticker(env, chatId,
+      "CAACAgUAAxkBAAEDu4Zp-rTrlmnphDX-WIT9au-O6aW5CwACLRYAAvgG8VSjN2gKlvlMQTsE"
     );
     try {
       const audioUrl = await gradioGenerate(text);
