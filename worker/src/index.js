@@ -25,15 +25,25 @@ async function answerCallback(env, callback_query_id, text = "") {
   return tg(env, "answerCallbackQuery", { callback_query_id, text });
 }
 
-async function sendAudio(env, chat_id, url, caption, extra = {}) {
-  return tg(env, "sendAudio", {
-    chat_id,
-    audio: url,
-    caption,
-    parse_mode: "Markdown",
-    title: "VoxCPM2",
-    ...extra,
+async function sendVoice(env, chat_id, audioUrl, caption, extra = {}) {
+  const audioResp = await fetch(audioUrl);
+  if (!audioResp.ok) throw new Error(`Failed to fetch audio: ${audioResp.status}`);
+  const audioBytes = await audioResp.arrayBuffer();
+
+  const form = new FormData();
+  form.append("chat_id", String(chat_id));
+  form.append("caption", caption);
+  form.append("parse_mode", "Markdown");
+  form.append("voice", new Blob([audioBytes], { type: "audio/ogg" }), "voice.ogg");
+  if (extra.reply_markup) {
+    form.append("reply_markup", JSON.stringify(extra.reply_markup));
+  }
+
+  const r = await fetch(`${TG_API}/bot${env.BOT_TOKEN}/sendVoice`, {
+    method: "POST",
+    body: form,
   });
+  return r.json();
 }
 
 // ── Keyboards ─────────────────────────────────────────────────────────────────
@@ -251,7 +261,7 @@ async function processUpdate(env, update) {
       const audioUrl = await gradioGenerate(text);
       const caption =
         `🎙️ *VoxCPM2 — Voice Design*\n📝 \`${text.slice(0, 100)}${text.length > 100 ? "..." : ""}\``;
-      await sendAudio(env, chatId, audioUrl, caption, { reply_markup: AFTER_AUDIO_KB });
+      await sendVoice(env, chatId, audioUrl, caption, { reply_markup: AFTER_AUDIO_KB });
     } catch (e) {
       await sendMessage(env, chatId, `❌ Error: ${e.message}`, { reply_markup: BACK_KB });
     }
@@ -281,7 +291,7 @@ async function processUpdate(env, update) {
       const audioUrl = await gradioGenerate(text, control);
       const caption =
         `🎙️ *VoxCPM2 — Controllable*\n🎛️ \`${control}\`\n📝 \`${text.slice(0, 80)}${text.length > 80 ? "..." : ""}\``;
-      await sendAudio(env, chatId, audioUrl, caption, { reply_markup: AFTER_AUDIO_KB });
+      await sendVoice(env, chatId, audioUrl, caption, { reply_markup: AFTER_AUDIO_KB });
     } catch (e) {
       await sendMessage(env, chatId, `❌ Error: ${e.message}`, { reply_markup: BACK_KB });
     }
@@ -323,7 +333,7 @@ async function processUpdate(env, update) {
       const audioUrl = await gradioGenerate(text, "", fileUrl);
       const caption =
         `🎙️ *VoxCPM2 — Voice Clone*\n📝 \`${text.slice(0, 100)}${text.length > 100 ? "..." : ""}\``;
-      await sendAudio(env, chatId, audioUrl, caption, { reply_markup: AFTER_AUDIO_KB });
+      await sendVoice(env, chatId, audioUrl, caption, { reply_markup: AFTER_AUDIO_KB });
     } catch (e) {
       await sendMessage(env, chatId, `❌ Error: ${e.message}`, { reply_markup: BACK_KB });
     }
