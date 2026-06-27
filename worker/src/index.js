@@ -191,29 +191,31 @@ function wavToOggOpus(wavBuffer) {
   return monoToOggOpus(pcm, info.sampleRate);
 }
 
-// Convert any audio URL to OGG Opus by proxying through the Replit API server
-// (which uses ffmpeg). Falls back to local WAV conversion if format is WAV.
+// Convert any audio URL to OGG Opus.
+// The Worker downloads the audio bytes itself (has direct HF access), then
+// POSTs the raw bytes to the Replit API server's ffmpeg /api/convert endpoint
+// for MP3. WAV is handled locally without any external call.
 async function audioUrlToOggOpus(audioUrl, env) {
-  const fmt = await fetch(audioUrl, { method: "HEAD" })
-    .then(r => {
-      const ct = r.headers.get("content-type") || "";
-      if (ct.includes("mpeg") || ct.includes("mp3")) return "mp3";
-      return "wav";
-    })
-    .catch(() => "wav");
+  const audioResp = await fetch(audioUrl);
+  if (!audioResp.ok) throw new Error(`Audio fetch failed: ${audioResp.status}`);
+  const audioBuffer = await audioResp.arrayBuffer();
 
-  if (fmt === "mp3") {
-    // Proxy through the Replit API server's ffmpeg-based /api/convert endpoint
-    const convertUrl = `${env.API_BASE_URL}/api/convert?url=${encodeURIComponent(audioUrl)}`;
-    const resp = await fetch(convertUrl);
-    if (!resp.ok) throw new Error(`Convert failed: ${resp.status}`);
-    return new Uint8Array(await resp.arrayBuffer());
+  const fmt = detectAudioFormat(audioBuffer);
+  if (fmt === "wav") {
+    return wavToOggOpus(audioBuffer);
   }
 
-  // WAV: fetch and convert locally
-  const resp = await fetch(audioUrl);
-  if (!resp.ok) throw new Error(`Audio fetch failed: ${resp.status}`);
-  return wavToOggOpus(await resp.arrayBuffer());
+  // MP3 (or unknown): POST raw bytes to the API server, get OGG Opus back
+  const convertResp = await fetch(`${env.API_BASE_URL}/api/convert`, {
+    method: "POST",
+    headers: { "Content-Type": "audio/mpeg" },
+    body: audioBuffer,
+  });
+  if (!convertResp.ok) {
+    const msg = await convertResp.text().catch(() => convertResp.status);
+    throw new Error(`Convert failed: ${msg}`);
+  }
+  return new Uint8Array(await convertResp.arrayBuffer());
 }
 
 // ── Telegram helpers ──────────────────────────────────────────────────────────
