@@ -293,27 +293,18 @@ async function clearState(env, userId) {
 }
 
 // ── HuggingFace Gradio API ────────────────────────────────────────────────────
-async function gradioGenerate(textInput, controlInstruction = "", refFileUrl = null) {
-  let uploadedFilePath = null;
+async function wakeUpSpace() {
+  try {
+    await fetch(`${HF_SPACE}/`, { signal: AbortSignal.timeout(10000) });
+  } catch (_) {}
+}
 
-  if (refFileUrl) {
-    const fileBytes = await fetch(refFileUrl).then((r) => r.arrayBuffer());
-    const form = new FormData();
-    form.append("files", new Blob([fileBytes], { type: "audio/ogg" }), "ref.ogg");
-    const upResp = await fetch(`${HF_SPACE}/gradio_api/upload`, {
-      method: "POST",
-      body: form,
-    }).then((r) => r.json());
-    if (Array.isArray(upResp) && upResp[0]) {
-      uploadedFilePath = upResp[0];
-    }
-  }
-
+async function gradioGenerateOnce(textInput, controlInstruction, uploadedFilePath) {
   const payload = {
     data: [
       textInput,
       controlInstruction,
-      uploadedFilePath ? { path: uploadedFilePath } : null,
+      uploadedFilePath ? { path: uploadedFilePath, meta: { _type: "gradio.FileData" }, orig_name: "reference.ogg" } : null,
       false,
       "",
       2.0,
@@ -326,14 +317,19 @@ async function gradioGenerate(textInput, controlInstruction = "", refFileUrl = n
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(30000),
   });
 
-  if (!initResp.ok) throw new Error(`Gradio init failed: ${initResp.status}`);
+  if (!initResp.ok) {
+    const body = await initResp.text().catch(() => "");
+    throw new Error(`Gradio init failed: ${initResp.status} ${body}`);
+  }
   const { event_id } = await initResp.json();
   if (!event_id) throw new Error("No event_id returned from Gradio");
 
   const sseResp = await fetch(
-    `${HF_SPACE}/gradio_api/call/generate/${event_id}`
+    `${HF_SPACE}/gradio_api/call/generate/${event_id}`,
+    { signal: AbortSignal.timeout(120000) }
   );
   if (!sseResp.ok) throw new Error(`SSE stream failed: ${sseResp.status}`);
 
@@ -352,15 +348,55 @@ async function gradioGenerate(textInput, controlInstruction = "", refFileUrl = n
         const url = parsed?.[0]?.url;
         if (url) { audioUrl = url; break; }
       } else if (eventType === "error") {
-        throw new Error(`Gradio error: ${dataStr ?? "unknown"}`);
+        const detail = dataStr && dataStr !== "null" ? dataStr : "HuggingFace Space error (try again)";
+        throw new Error(`Gradio error: ${detail}`);
       }
       eventType = null;
       dataStr = null;
     }
   }
 
-  if (!audioUrl) throw new Error("No audio URL in Gradio complete event");
+  if (!audioUrl) throw new Error("No audio URL in Gradio response");
   return audioUrl;
+}
+
+async function gradioGenerate(textInput, controlInstruction = "", refFileUrl = null) {
+  let uploadedFilePath = null;
+
+  if (refFileUrl) {
+    const fileBytes = await fetch(refFileUrl, { signal: AbortSignal.timeout(30000) }).then((r) => r.arrayBuffer());
+    const form = new FormData();
+    form.append("files", new Blob([fileBytes], { type: "audio/ogg" }), "ref.ogg");
+    const upResp = await fetch(`${HF_SPACE}/gradio_api/upload`, {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(30000),
+    }).then((r) => r.json());
+    if (Array.isArray(upResp) && upResp[0]) {
+      uploadedFilePath = upResp[0];
+    }
+  }
+
+  // Try up to 3 times — first attempt may fail if the Space is waking up
+  const MAX_ATTEMPTS = 3;
+  let lastError;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      if (attempt > 1) {
+        // Wake up the space and wait before retrying
+        await wakeUpSpace();
+        await new Promise((r) => setTimeout(r, 3000 * attempt));
+      }
+      return await gradioGenerateOnce(textInput, controlInstruction, uploadedFilePath);
+    } catch (err) {
+      lastError = err;
+      // Only retry on Space-level errors (null data), not on bad input errors
+      const msg = err?.message ?? "";
+      const isRetryable = msg.includes("HuggingFace Space error") || msg.includes("SSE stream failed") || msg.includes("init failed");
+      if (!isRetryable) throw err;
+    }
+  }
+  throw lastError;
 }
 
 // ── Download Telegram file URL ────────────────────────────────────────────────
