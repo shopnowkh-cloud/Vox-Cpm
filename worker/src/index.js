@@ -3,6 +3,16 @@ import OpusScript from "opusscript";
 const TG_API = "https://api.telegram.org";
 const HF_SPACE = "https://openbmb-voxcpm-demo.hf.space";
 
+// ── Audio format detection ────────────────────────────────────────────────────
+
+function detectAudioFormat(buf) {
+  const b = new Uint8Array(buf, 0, Math.min(4, buf.byteLength));
+  if ((b[0] === 0xff && (b[1] & 0xe0) === 0xe0) ||
+      (b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x44)) return "mp3";
+  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46) return "wav";
+  return "unknown";
+}
+
 // ── WAV → OGG Opus conversion ─────────────────────────────────────────────────
 
 function parseWav(buf) {
@@ -143,27 +153,26 @@ function opusTags() {
   return b;
 }
 
-function wavToOggOpus(wavBuffer) {
-  const info = parseWav(wavBuffer);
-  const pcm = toMono48kFloat32(wavBuffer, info);
+// Shared: encode a mono Float32 array (at 48 kHz) to OGG Opus bytes.
+// origSampleRate is embedded in the OpusHead for player metadata only.
+function monoToOggOpus(pcm48k, origSampleRate) {
   const encoder = new OpusScript(48000, 1, OpusScript.Application.AUDIO);
-
-  const FRAME = 960; // 20ms @ 48kHz
+  const FRAME = 960; // 20 ms @ 48 kHz
   const PRE_SKIP = 312;
   const serial = (Math.random() * 0x7fffffff) | 0;
   let seq = 0, granule = 0;
   const pages = [];
 
-  pages.push(oggPage(0x02, 0, serial, seq++, [opusHead(1, info.sampleRate)]));
+  pages.push(oggPage(0x02, 0, serial, seq++, [opusHead(1, origSampleRate)]));
   pages.push(oggPage(0x00, 0, serial, seq++, [opusTags()]));
 
-  for (let offset = 0; offset < pcm.length; offset += FRAME) {
+  for (let offset = 0; offset < pcm48k.length; offset += FRAME) {
     const chunk = new Float32Array(FRAME);
-    chunk.set(pcm.subarray(offset, offset + FRAME));
+    chunk.set(pcm48k.subarray(offset, offset + FRAME));
     const pcm16 = new Int16Array(FRAME);
     for (let i = 0; i < FRAME; i++) pcm16[i] = Math.max(-32768, Math.min(32767, (chunk[i] * 32767) | 0));
     granule += FRAME;
-    const isLast = offset + FRAME >= pcm.length;
+    const isLast = offset + FRAME >= pcm48k.length;
     const encoded = encoder.encode(Buffer.from(pcm16.buffer), FRAME);
     pages.push(oggPage(isLast ? 0x04 : 0x00, granule + PRE_SKIP, serial, seq++, [encoded]));
   }
@@ -174,6 +183,37 @@ function wavToOggOpus(wavBuffer) {
   let pos = 0;
   for (const p of pages) { out.set(p, pos); pos += p.length; }
   return out;
+}
+
+function wavToOggOpus(wavBuffer) {
+  const info = parseWav(wavBuffer);
+  const pcm = toMono48kFloat32(wavBuffer, info);
+  return monoToOggOpus(pcm, info.sampleRate);
+}
+
+// Convert any audio URL to OGG Opus by proxying through the Replit API server
+// (which uses ffmpeg). Falls back to local WAV conversion if format is WAV.
+async function audioUrlToOggOpus(audioUrl, env) {
+  const fmt = await fetch(audioUrl, { method: "HEAD" })
+    .then(r => {
+      const ct = r.headers.get("content-type") || "";
+      if (ct.includes("mpeg") || ct.includes("mp3")) return "mp3";
+      return "wav";
+    })
+    .catch(() => "wav");
+
+  if (fmt === "mp3") {
+    // Proxy through the Replit API server's ffmpeg-based /api/convert endpoint
+    const convertUrl = `${env.API_BASE_URL}/api/convert?url=${encodeURIComponent(audioUrl)}`;
+    const resp = await fetch(convertUrl);
+    if (!resp.ok) throw new Error(`Convert failed: ${resp.status}`);
+    return new Uint8Array(await resp.arrayBuffer());
+  }
+
+  // WAV: fetch and convert locally
+  const resp = await fetch(audioUrl);
+  if (!resp.ok) throw new Error(`Audio fetch failed: ${resp.status}`);
+  return wavToOggOpus(await resp.arrayBuffer());
 }
 
 // ── Telegram helpers ──────────────────────────────────────────────────────────
@@ -204,45 +244,20 @@ async function answerCallback(env, callback_query_id, text = "") {
   return tg(env, "answerCallbackQuery", { callback_query_id, text });
 }
 
-function detectAudioFormat(buf) {
-  const b = new Uint8Array(buf, 0, Math.min(4, buf.byteLength));
-  // MP3: sync word ff fb / ff f3 / ff f2, or ID3 tag
-  if ((b[0] === 0xff && (b[1] & 0xe0) === 0xe0) ||
-      (b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x44)) return "mp3";
-  // WAV: RIFF....WAVE
-  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46) return "wav";
-  return "unknown";
-}
-
 async function sendVoice(env, chat_id, audioUrl, caption, extra = {}) {
-  const audioResp = await fetch(audioUrl);
-  if (!audioResp.ok) throw new Error(`Audio fetch failed: ${audioResp.status}`);
-  const audioBuffer = await audioResp.arrayBuffer();
+  // Always produce OGG Opus — converts via ffmpeg for MP3, locally for WAV
+  const oggBytes = await audioUrlToOggOpus(audioUrl, env);
 
-  const fmt = detectAudioFormat(audioBuffer);
   const form = new FormData();
   form.append("chat_id", String(chat_id));
   form.append("caption", caption);
   form.append("parse_mode", "Markdown");
+  form.append("voice", new Blob([oggBytes], { type: "audio/ogg" }), "voice.ogg");
   if (extra.reply_markup) {
     form.append("reply_markup", JSON.stringify(extra.reply_markup));
   }
 
-  let method;
-  if (fmt === "wav") {
-    // Convert WAV → OGG Opus for Telegram voice message
-    const oggBytes = wavToOggOpus(audioBuffer);
-    form.append("voice", new Blob([oggBytes], { type: "audio/ogg" }), "voice.ogg");
-    method = "sendVoice";
-  } else {
-    // MP3 or unknown — send as audio file; Telegram accepts MP3 natively
-    const mimeType = fmt === "mp3" ? "audio/mpeg" : "application/octet-stream";
-    const fileName = fmt === "mp3" ? "audio.mp3" : "audio.bin";
-    form.append("audio", new Blob([audioBuffer], { type: mimeType }), fileName);
-    method = "sendAudio";
-  }
-
-  const r = await fetch(`${TG_API}/bot${env.BOT_TOKEN}/${method}`, {
+  const r = await fetch(`${TG_API}/bot${env.BOT_TOKEN}/sendVoice`, {
     method: "POST",
     body: form,
   });
