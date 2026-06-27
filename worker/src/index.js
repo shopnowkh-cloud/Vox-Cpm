@@ -483,9 +483,9 @@ async function processUpdate(env, update) {
     );
     try {
       const audioUrl = await gradioGenerate(text);
-      const caption =
-        `Voice Design`;
-      await sendVoice(env, chatId, audioUrl, caption, { reply_markup: AFTER_AUDIO_KB });
+      const caption = `Voice Design`;
+      await sendVoice(env, chatId, audioUrl, caption, {});
+      await sendMessage(env, chatId, "✅ *បានបង្កើតជោគជ័យ!*", { reply_markup: AFTER_AUDIO_KB });
     } catch (e) {
       await sendMessage(env, chatId, `❌ Error: ${e.message}`, { reply_markup: BACK_KB });
     }
@@ -515,7 +515,8 @@ async function processUpdate(env, update) {
       const audioUrl = await gradioGenerate(text, control);
       const caption =
         `🎙️ *VoxCPM2 — Controllable*\n🎛️ \`${control}\`\n📝 \`${text.slice(0, 80)}${text.length > 80 ? "..." : ""}\``;
-      await sendVoice(env, chatId, audioUrl, caption, { reply_markup: AFTER_AUDIO_KB });
+      await sendVoice(env, chatId, audioUrl, caption, {});
+      await sendMessage(env, chatId, "✅ *បានបង្កើតជោគជ័យ!*", { reply_markup: AFTER_AUDIO_KB });
     } catch (e) {
       await sendMessage(env, chatId, `❌ Error: ${e.message}`, { reply_markup: BACK_KB });
     }
@@ -557,7 +558,8 @@ async function processUpdate(env, update) {
       const audioUrl = await gradioGenerate(text, "", fileUrl);
       const caption =
         `🎙️ *VoxCPM2 — Voice Clone*\n📝 \`${text.slice(0, 100)}${text.length > 100 ? "..." : ""}\``;
-      await sendVoice(env, chatId, audioUrl, caption, { reply_markup: AFTER_AUDIO_KB });
+      await sendVoice(env, chatId, audioUrl, caption, {});
+      await sendMessage(env, chatId, "✅ *បានបង្កើតជោគជ័យ!*", { reply_markup: AFTER_AUDIO_KB });
     } catch (e) {
       await sendMessage(env, chatId, `❌ Error: ${e.message}`, { reply_markup: BACK_KB });
     }
