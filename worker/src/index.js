@@ -399,7 +399,7 @@ async function processUpdate(env, update) {
     try {
       const audioUrl = await gradioGenerate(text);
       const caption =
-        `🎙️ *VoxCPM2 — Voice Design*\n📝 \`${text.slice(0, 100)}${text.length > 100 ? "..." : ""}\``;
+        `Voice Design`;
       await sendVoice(env, chatId, audioUrl, caption, {});
     } catch (e) {
       await sendMessage(env, chatId, `❌ Error: ${e.message}`, { reply_markup: BACK_KB });
