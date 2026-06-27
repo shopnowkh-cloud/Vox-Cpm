@@ -5,12 +5,9 @@
  * VoxCPM TTS API — powered by the real VoxCPM2 model via HuggingFace Spaces
  * OpenAPI spec version: 0.1.0
  */
-import type { TtsLanguage } from './ttsLanguage';
-import type { TtsMode } from './ttsMode';
 
-export interface TtsModel {
+export interface TtsMode {
   id: string;
-  name: string;
-  modes: TtsMode[];
-  languages: TtsLanguage[];
+  label: string;
+  description: string;
 }

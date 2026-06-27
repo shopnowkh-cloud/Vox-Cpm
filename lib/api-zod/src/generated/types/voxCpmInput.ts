@@ -5,9 +5,6 @@
  * VoxCPM TTS API — powered by the real VoxCPM2 model via HuggingFace Spaces
  * OpenAPI spec version: 0.1.0
  */
-export interface HealthStatus {
-  status: string;
-}
 
 export interface VoxCpmInput {
   /**
@@ -43,30 +40,3 @@ export interface VoxCpmInput {
   /** Denoise the reference audio before cloning */
   denoise?: boolean;
 }
-
-export interface TtsMode {
-  id: string;
-  label: string;
-  description: string;
-}
-
-export interface TtsLanguage {
-  code: string;
-  label: string;
-}
-
-export interface TtsModel {
-  id: string;
-  name: string;
-  modes: TtsMode[];
-  languages: TtsLanguage[];
-}
-
-export interface TtsModels {
-  models: TtsModel[];
-}
-
-export interface ErrorResponse {
-  error: string;
-}
-

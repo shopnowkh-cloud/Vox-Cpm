@@ -81,16 +81,25 @@ if (!checkData.success) {
   console.log("Project exists:", checkData.result?.subdomain);
 }
 
-// 4. Deploy to Cloudflare Pages
+// 4. Copy cf-pages to /tmp (outside git repo) so wrangler never touches .git
+console.log("\n=== Staging deployment outside git repo ===");
+const tmpDeploy = "/tmp/vox-studio-cf-deploy";
+if (fs.existsSync(tmpDeploy)) fs.rmSync(tmpDeploy, { recursive: true });
+fs.cpSync(cfPagesDir, tmpDeploy, { recursive: true });
+console.log(`Staged to ${tmpDeploy}`);
+
+// 5. Deploy to Cloudflare Pages from /tmp
 console.log("\n=== Deploying to Cloudflare Pages ===");
 run(
-  "npx --yes wrangler pages deploy dist --project-name=vox-studio --branch=main --commit-dirty=true --commit-hash=deploy-1 --commit-message=deploy",
+  "npx --yes wrangler pages deploy dist --project-name=vox-studio --branch=main --commit-dirty=true --commit-hash=deploy-2 --commit-message=voxcpm2-integration",
   {
-    cwd: cfPagesDir,
+    cwd: tmpDeploy,
     env: {
       ...process.env,
       CLOUDFLARE_API_TOKEN: CF_API_TOKEN,
       CLOUDFLARE_ACCOUNT_ID: CF_ACCOUNT_ID,
+      // prevent wrangler from running any git commands
+      GIT_DIR: "/tmp/nogit",
     },
   }
 );

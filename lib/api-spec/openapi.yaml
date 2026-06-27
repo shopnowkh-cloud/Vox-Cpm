@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Api
   version: 0.1.0
-  description: VoxCPM TTS API powered by Cloudflare Workers AI
+  description: VoxCPM TTS API — powered by the real VoxCPM2 model via HuggingFace Spaces
 servers:
   - url: /api
     description: Base API path
@@ -17,7 +17,6 @@ paths:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -29,17 +28,20 @@ paths:
     post:
       operationId: synthesizeSpeech
       tags: [tts]
-      summary: Synthesize speech from text
-      description: Converts text to speech using Cloudflare Workers AI (MeloTTS)
+      summary: Synthesize speech using VoxCPM2
+      description: |
+        Calls the real VoxCPM2 model via HuggingFace Spaces Gradio API.
+        Supports three modes: Voice Design, Controllable Cloning, Ultimate Cloning.
+        Returns raw audio binary (WAV).
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/TtsInput"
+              $ref: "#/components/schemas/VoxCpmInput"
       responses:
         "200":
-          description: Audio file (WAV)
+          description: Generated audio (WAV)
           content:
             audio/wav:
               schema:
@@ -47,6 +49,12 @@ paths:
                 format: binary
         "400":
           description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Upstream HuggingFace error
           content:
             application/json:
               schema:
@@ -61,10 +69,10 @@ paths:
     get:
       operationId: getTtsModels
       tags: [tts]
-      summary: List available TTS models and languages
+      summary: List available TTS models
       responses:
         "200":
-          description: List of available TTS models
+          description: Available models info
           content:
             application/json:
               schema:
@@ -73,33 +81,57 @@ components:
   schemas:
     HealthStatus:
       type: object
+      required: [status]
       properties:
         status:
           type: string
-      required:
-        - status
-    TtsInput:
+    VoxCpmInput:
       type: object
-      required:
-        - text
+      required: [text]
       properties:
         text:
           type: string
-          description: The text to convert to speech
+          description: Text to synthesize (up to 2000 chars)
           minLength: 1
           maxLength: 2000
-        lang:
+        control_instruction:
           type: string
-          description: Language code (e.g. EN, ZH, ES, FR, JP, KR)
-          default: EN
-        speed:
+          description: |
+            Voice Design: describe the voice (gender, age, tone, emotion, pace).
+            Controllable Cloning: style guidance on top of reference audio timbre.
+            Leave empty for Ultimate Cloning.
+          default: ""
+        reference_audio_base64:
+          type: ["string", "null"]
+          description: Base64-encoded reference audio for cloning modes (WAV/MP3). Null for Voice Design.
+          default: null
+        reference_audio_name:
+          type: ["string", "null"]
+          description: Filename of the reference audio (e.g. reference.wav)
+          default: null
+        use_prompt_text:
+          type: boolean
+          description: Enable Ultimate Cloning mode (requires reference_audio_base64 + prompt_text)
+          default: false
+        prompt_text:
+          type: string
+          description: Transcript of the reference audio for Ultimate Cloning
+          default: ""
+        cfg_value:
           type: number
-          description: Speech speed multiplier (0.5 to 2.0)
-          default: 1.0
+          description: CFG guidance scale (1.0–3.0). Higher = more controlled.
+          default: 2.0
+        do_normalize:
+          type: boolean
+          description: Normalize audio loudness
+          default: false
+        denoise:
+          type: boolean
+          description: Denoise the reference audio before cloning
+          default: false
     TtsModels:
       type: object
-      required:
-        - models
+      required: [models]
       properties:
         models:
           type: array
@@ -107,24 +139,33 @@ components:
             $ref: "#/components/schemas/TtsModel"
     TtsModel:
       type: object
-      required:
-        - id
-        - name
-        - languages
+      required: [id, name, modes, languages]
       properties:
         id:
           type: string
         name:
           type: string
+        modes:
+          type: array
+          items:
+            $ref: "#/components/schemas/TtsMode"
         languages:
           type: array
           items:
             $ref: "#/components/schemas/TtsLanguage"
+    TtsMode:
+      type: object
+      required: [id, label, description]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        description:
+          type: string
     TtsLanguage:
       type: object
-      required:
-        - code
-        - label
+      required: [code, label]
       properties:
         code:
           type: string
@@ -132,8 +173,7 @@ components:
           type: string
     ErrorResponse:
       type: object
-      required:
-        - error
+      required: [error]
       properties:
         error:
           type: string
