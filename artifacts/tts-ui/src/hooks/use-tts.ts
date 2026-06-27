@@ -1,6 +1,10 @@
 import { useMutation } from "@tanstack/react-query";
 import type { VoxCpmInput } from "@workspace/api-client-react";
 
+export type SynthesizePayload = VoxCpmInput & {
+  cf_turnstile_token?: string;
+};
+
 export type TtsMode = "voice_design" | "controllable_cloning" | "ultimate_cloning";
 
 export type AudioHistoryItem = {
@@ -14,7 +18,7 @@ export type AudioHistoryItem = {
 
 export function useSynthesizeAudio() {
   return useMutation({
-    mutationFn: async (data: VoxCpmInput) => {
+    mutationFn: async (data: SynthesizePayload) => {
       const response = await fetch("/api/tts/synthesize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

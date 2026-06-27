@@ -1,5 +1,25 @@
 const HF_SPACE = "https://openbmb-voxcpm-demo.hf.space";
 
+// Use real Turnstile secret from env, or the always-pass test secret
+const TURNSTILE_TEST_SECRET = "1x0000000000000000000000000000000AA";
+
+async function verifyTurnstile(token, secretKey, clientIp) {
+  const res = await fetch(
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        secret: secretKey,
+        response: token,
+        remoteip: clientIp,
+      }),
+    }
+  );
+  const data = await res.json();
+  return data.success === true;
+}
+
 async function uploadAudioToGradio(base64, filename) {
   const binary = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const blob = new Blob([binary]);
@@ -122,7 +142,19 @@ export async function onRequestPost(context) {
       cfg_value = 2.0,
       do_normalize = false,
       denoise = false,
+      cf_turnstile_token,
     } = body;
+
+    // Verify Cloudflare Turnstile token
+    const secretKey = context.env.TURNSTILE_SECRET_KEY ?? TURNSTILE_TEST_SECRET;
+    const clientIp = context.request.headers.get("CF-Connecting-IP") ?? "";
+    if (!cf_turnstile_token) {
+      return Response.json({ error: "ការផ្ទៀងផ្ទាត់សុវត្ថិភាពត្រូវបានទាមទារ" }, { status: 403 });
+    }
+    const valid = await verifyTurnstile(cf_turnstile_token, secretKey, clientIp);
+    if (!valid) {
+      return Response.json({ error: "ការផ្ទៀងផ្ទាត់ Cloudflare បរាជ័យ — សូមព្យាយាមម្ដងទៀត" }, { status: 403 });
+    }
 
     if (!text || typeof text !== "string" || text.trim().length === 0) {
       return Response.json({ error: "text is required" }, { status: 400 });

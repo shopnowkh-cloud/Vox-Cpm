@@ -5,6 +5,17 @@ import { logger } from "../lib/logger";
 const router: IRouter = Router();
 
 const HF_SPACE = "https://openbmb-voxcpm-demo.hf.space";
+const TURNSTILE_TEST_SECRET = "1x0000000000000000000000000000000AA";
+
+async function verifyTurnstile(token: string, secretKey: string): Promise<boolean> {
+  const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ secret: secretKey, response: token }),
+  });
+  const data = (await res.json()) as { success: boolean };
+  return data.success === true;
+}
 
 async function uploadAudioToGradio(
   base64: string,
@@ -23,7 +34,7 @@ async function uploadAudioToGradio(
   if (!res.ok) {
     throw new Error(`HF upload failed: ${res.status}`);
   }
-  const paths: string[] = await res.json();
+  const paths = (await res.json()) as string[];
   return paths[0];
 }
 
@@ -175,6 +186,19 @@ router.get("/tts/models", (_req, res): void => {
 });
 
 router.post("/tts/synthesize", async (req, res): Promise<void> => {
+  // Verify Cloudflare Turnstile
+  const turnstileToken = req.body?.cf_turnstile_token as string | undefined;
+  if (!turnstileToken) {
+    res.status(403).json({ error: "ការផ្ទៀងផ្ទាត់សុវត្ថិភាពត្រូវបានទាមទារ" });
+    return;
+  }
+  const secretKey = process.env.TURNSTILE_SECRET_KEY ?? TURNSTILE_TEST_SECRET;
+  const valid = await verifyTurnstile(turnstileToken, secretKey);
+  if (!valid) {
+    res.status(403).json({ error: "ការផ្ទៀងផ្ទាត់ Cloudflare បរាជ័យ — សូមព្យាយាមម្ដងទៀត" });
+    return;
+  }
+
   const parsed = SynthesizeSpeechBody.safeParse(req.body);
   if (!parsed.success) {
     req.log.warn({ errors: parsed.error.message }, "Invalid TTS request body");

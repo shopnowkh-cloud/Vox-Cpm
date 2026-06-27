@@ -15,9 +15,11 @@ import {
   ChevronDown,
   ChevronUp,
   Loader2,
+  ShieldCheck,
 } from "lucide-react";
 
 import { useSynthesizeAudio, fileToBase64, type AudioHistoryItem, type TtsMode } from "@/hooks/use-tts";
+import { TurnstileWidget } from "@/components/turnstile";
 import { Waveform } from "@/components/waveform";
 import { AudioPlayer } from "@/components/audio-player";
 
@@ -33,27 +35,27 @@ import { cn } from "@/lib/utils";
 
 const MODE_CONFIG: Record<TtsMode, { label: string; icon: React.ReactNode; description: string; color: string }> = {
   voice_design: {
-    label: "Voice Design",
+    label: "រចនាសំឡេង",
     icon: <Wand2 className="h-4 w-4" />,
-    description: "Create any voice from a text description",
+    description: "បង្កើតសំឡេងណាមួយពីការពិពណ៌នា",
     color: "text-violet-400 border-violet-500/40 bg-violet-500/10",
   },
   controllable_cloning: {
-    label: "Controllable Cloning",
+    label: "ចម្លងបានទំនង",
     icon: <Copy className="h-4 w-4" />,
-    description: "Clone a voice timbre with style guidance",
+    description: "ចម្លងបែបសំឡេងជាមួយការណែនាំ",
     color: "text-sky-400 border-sky-500/40 bg-sky-500/10",
   },
   ultimate_cloning: {
-    label: "Ultimate Cloning",
+    label: "ចម្លងខ្ពស់",
     icon: <Sparkles className="h-4 w-4" />,
-    description: "Maximum fidelity clone with transcript",
+    description: "ចម្លងភាពស្មោះត្រង់ជាមួយប្រតិចារឹក",
     color: "text-amber-400 border-amber-500/40 bg-amber-500/10",
   },
 };
 
 const formSchema = z.object({
-  text: z.string().min(1, "Text is required").max(2000),
+  text: z.string().min(1, "ត្រូវការអត្ថបទ").max(2000),
   control_instruction: z.string().default(""),
   prompt_text: z.string().default(""),
   cfg_value: z.number().min(1).max(3).default(2),
@@ -76,6 +78,8 @@ export default function Studio() {
   const [history, setHistory] = useState<AudioHistoryItem[]>([]);
   const [referenceFile, setReferenceFile] = useState<File | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileResetKey, setTurnstileResetKey] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const synthesize = useSynthesizeAudio();
 
@@ -103,8 +107,21 @@ export default function Studio() {
   }, []);
 
   const onSubmit = async (values: FormValues) => {
+    if (!turnstileToken) {
+      toast({
+        title: "ត្រូវការការផ្ទៀងផ្ទាត់",
+        description: "សូមបំពេញការផ្ទៀងផ្ទាត់សុវត្ថិភាព Cloudflare ជាមុន",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if ((mode === "controllable_cloning" || mode === "ultimate_cloning") && !referenceFile) {
-      toast({ title: "Reference audio required", description: "Please upload a reference audio file.", variant: "destructive" });
+      toast({
+        title: "ត្រូវការសំឡេងយោង",
+        description: "សូមបញ្ចូលឯកសារសំឡេងយោង",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -124,6 +141,7 @@ export default function Studio() {
         cfg_value: values.cfg_value,
         do_normalize: values.do_normalize,
         denoise: values.denoise,
+        cf_turnstile_token: turnstileToken,
       });
 
       setHistory((prev) => [
@@ -138,11 +156,17 @@ export default function Studio() {
         ...prev,
       ]);
 
-      toast({ title: "Generation complete", description: "Your audio is ready." });
+      // Reset Turnstile after each use
+      setTurnstileToken(null);
+      setTurnstileResetKey((k) => k + 1);
+
+      toast({ title: "ការបង្កើតបានសម្រេច", description: "សំឡេងរបស់អ្នករួចរាល់" });
     } catch (err) {
+      setTurnstileToken(null);
+      setTurnstileResetKey((k) => k + 1);
       toast({
-        title: "Generation failed",
-        description: err instanceof Error ? err.message : "Unknown error",
+        title: "ការបង្កើតបរាជ័យ",
+        description: err instanceof Error ? err.message : "មានបញ្ហាមិនស្គាល់",
         variant: "destructive",
       });
     }
@@ -162,9 +186,13 @@ export default function Studio() {
           </div>
           <div>
             <h1 className="text-lg font-semibold tracking-tight">Vox Studio</h1>
-            <p className="text-[11px] text-white/30 font-mono">Powered by VoxCPM2</p>
+            <p className="text-[11px] text-white/30 font-mono">ដំណើរការដោយ VoxCPM2</p>
           </div>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <Badge className="bg-orange-500/10 border-orange-500/30 text-orange-400 text-[10px] font-mono flex items-center gap-1">
+              <ShieldCheck className="h-3 w-3" />
+              CF Protected
+            </Badge>
             <Badge className="bg-emerald-500/10 border-emerald-500/30 text-emerald-400 text-[10px] font-mono">
               LIVE
             </Badge>
@@ -174,7 +202,7 @@ export default function Studio() {
         <div className="flex-1 px-8 py-6 space-y-6">
           {/* Mode Selector */}
           <div>
-            <p className="text-[11px] font-mono text-white/30 mb-3 uppercase tracking-widest">Generation Mode</p>
+            <p className="text-[11px] font-mono text-white/30 mb-3 uppercase tracking-widest">របៀបបង្កើត</p>
             <div className="grid grid-cols-3 gap-2">
               {(Object.keys(MODE_CONFIG) as TtsMode[]).map((m) => {
                 const cfg = MODE_CONFIG[m];
@@ -202,11 +230,12 @@ export default function Studio() {
             </div>
           </div>
 
-          {/* Text Input */}
+          {/* Form */}
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
+            {/* Target Text */}
             <div>
               <div className="flex justify-between items-center mb-2">
-                <Label className="text-[11px] font-mono text-white/30 uppercase tracking-widest">Target Text</Label>
+                <Label className="text-[11px] font-mono text-white/30 uppercase tracking-widest">អត្ថបទ</Label>
                 <span className="text-[10px] font-mono text-white/20">{textValue.length} / 2000</span>
               </div>
               <Controller
@@ -216,7 +245,7 @@ export default function Studio() {
                   <>
                     <Textarea
                       {...field}
-                      placeholder="Enter the text you want to synthesize..."
+                      placeholder="បញ្ចូលអត្ថបទដែលអ្នកចង់បំប្លែងជាសំឡេង..."
                       className="min-h-[140px] resize-none bg-white/3 border-white/8 text-white/90 placeholder:text-white/20 focus-visible:ring-violet-500/50 focus-visible:border-violet-500/40 rounded-xl text-sm leading-relaxed"
                     />
                     {fieldState.error && (
@@ -231,7 +260,7 @@ export default function Studio() {
             {mode === "voice_design" && (
               <div>
                 <Label className="text-[11px] font-mono text-white/30 uppercase tracking-widest mb-2 block">
-                  Voice Description
+                  ការពិពណ៌នាសំឡេង
                 </Label>
                 <Controller
                   control={form.control}
@@ -239,7 +268,7 @@ export default function Studio() {
                   render={({ field }) => (
                     <Textarea
                       {...field}
-                      placeholder="Describe the voice: e.g. 'A warm female voice in her 30s, speaks softly at a moderate pace...'"
+                      placeholder="ពិពណ៌នាអំពីសំឡេង — ភេទ អាយុ សម្លេង អារម្មណ៍ ល្បឿន..."
                       className="min-h-[90px] resize-none bg-white/3 border-white/8 text-white/90 placeholder:text-white/20 focus-visible:ring-violet-500/50 focus-visible:border-violet-500/40 rounded-xl text-sm"
                     />
                   )}
@@ -272,7 +301,7 @@ export default function Studio() {
                 />
                 <div>
                   <Label className="text-[11px] font-mono text-white/30 uppercase tracking-widest mb-2 block">
-                    Style Instruction <span className="text-white/15">(optional)</span>
+                    ការណែនាំរចនាប័ទ្ម <span className="text-white/15">(ស្រេចចិត្ត)</span>
                   </Label>
                   <Controller
                     control={form.control}
@@ -280,7 +309,7 @@ export default function Studio() {
                     render={({ field }) => (
                       <Textarea
                         {...field}
-                        placeholder="Guide the style on top of the reference timbre: e.g. 'Speak more slowly and with a calm tone'"
+                        placeholder="ណែនាំរចនាប័ទ្មបន្ថែមលើបែបសំឡេង..."
                         className="min-h-[75px] resize-none bg-white/3 border-white/8 text-white/90 placeholder:text-white/20 focus-visible:ring-sky-500/50 rounded-xl text-sm"
                       />
                     )}
@@ -302,9 +331,9 @@ export default function Studio() {
                 />
                 <div>
                   <Label className="text-[11px] font-mono text-white/30 uppercase tracking-widest mb-2 block">
-                    Reference Transcript
-                    <span className="text-white/30 normal-case font-sans ml-2 text-[10px]">
-                      — exact words spoken in the reference audio
+                    ប្រតិចារឹករបស់សំឡេងយោង
+                    <span className="text-white/25 normal-case font-sans ml-2 text-[10px]">
+                      — ពាក្យពិតដែលនិយាយក្នុងសំឡេងយោង
                     </span>
                   </Label>
                   <Controller
@@ -313,7 +342,7 @@ export default function Studio() {
                     render={({ field }) => (
                       <Textarea
                         {...field}
-                        placeholder="Type the exact text spoken in the reference audio..."
+                        placeholder="វាយអត្ថបទពិតដែលនិយាយក្នុងសំឡេងយោង..."
                         className="min-h-[75px] resize-none bg-white/3 border-white/8 text-white/90 placeholder:text-white/20 focus-visible:ring-amber-500/50 rounded-xl text-sm"
                       />
                     )}
@@ -329,7 +358,7 @@ export default function Studio() {
                 onClick={() => setShowAdvanced(!showAdvanced)}
                 className="w-full flex items-center justify-between px-4 py-3 text-[11px] font-mono text-white/30 hover:text-white/50 uppercase tracking-widest transition-colors"
               >
-                Advanced Settings
+                ការកំណត់កម្រិតខ្ពស់
                 {showAdvanced ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
               </button>
               {showAdvanced && (
@@ -337,7 +366,7 @@ export default function Studio() {
                   <div>
                     <div className="flex justify-between mb-2">
                       <Label className="text-[11px] font-mono text-white/30 uppercase tracking-widest">
-                        CFG Guidance
+                        ការណែនាំ CFG
                       </Label>
                       <span className="text-[11px] font-mono text-white/50">{cfgValue.toFixed(1)}</span>
                     </div>
@@ -356,8 +385,8 @@ export default function Studio() {
                       )}
                     />
                     <div className="flex justify-between text-[10px] text-white/20 mt-1">
-                      <span>1.0 free</span>
-                      <span>3.0 strict</span>
+                      <span>1.0 សេរី</span>
+                      <span>3.0 តឹងរ៉ឹង</span>
                     </div>
                   </div>
 
@@ -372,7 +401,7 @@ export default function Studio() {
                             onCheckedChange={field.onChange}
                             className="border-white/20 data-[state=checked]:bg-violet-500 data-[state=checked]:border-violet-500"
                           />
-                          <span className="text-xs text-white/50">Normalize loudness</span>
+                          <span className="text-xs text-white/50">ធ្វើសមស្របសំឡេង</span>
                         </label>
                       )}
                     />
@@ -387,7 +416,7 @@ export default function Studio() {
                               onCheckedChange={field.onChange}
                               className="border-white/20 data-[state=checked]:bg-violet-500 data-[state=checked]:border-violet-500"
                             />
-                            <span className="text-xs text-white/50">Denoise reference</span>
+                            <span className="text-xs text-white/50">ដកសំឡេងរំខាន</span>
                           </label>
                         )}
                       />
@@ -397,21 +426,41 @@ export default function Studio() {
               )}
             </div>
 
+            {/* Cloudflare Turnstile Security */}
+            <div className="rounded-xl border border-orange-500/15 bg-orange-500/5 p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <ShieldCheck className="h-3.5 w-3.5 text-orange-400" />
+                <span className="text-[11px] font-mono text-orange-400/70 uppercase tracking-widest">
+                  ការផ្ទៀងផ្ទាត់សុវត្ថិភាព Cloudflare
+                </span>
+                {turnstileToken && (
+                  <Badge className="ml-auto bg-emerald-500/15 border-emerald-500/30 text-emerald-400 text-[9px]">
+                    ✓ បានផ្ទៀងផ្ទាត់
+                  </Badge>
+                )}
+              </div>
+              <TurnstileWidget
+                onSuccess={(token) => setTurnstileToken(token)}
+                onExpire={() => setTurnstileToken(null)}
+                resetKey={turnstileResetKey}
+              />
+            </div>
+
             {/* Generate Button */}
             <div className="flex items-center gap-4 pt-2">
               <Button
                 type="submit"
                 size="lg"
-                disabled={synthesize.isPending}
-                className="px-10 font-mono tracking-wider bg-gradient-to-r from-violet-600 to-sky-600 hover:from-violet-500 hover:to-sky-500 border-0 text-white shadow-lg shadow-violet-500/20"
+                disabled={synthesize.isPending || !turnstileToken}
+                className="px-10 font-mono tracking-wider bg-gradient-to-r from-violet-600 to-sky-600 hover:from-violet-500 hover:to-sky-500 border-0 text-white shadow-lg shadow-violet-500/20 disabled:opacity-40"
               >
                 {synthesize.isPending ? (
                   <span className="flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    GENERATING...
+                    កំពុងបង្កើត...
                   </span>
                 ) : (
-                  "GENERATE"
+                  "បង្កើត"
                 )}
               </Button>
               <div className="flex-1">
@@ -427,7 +476,7 @@ export default function Studio() {
         <header className="px-6 py-5 border-b border-white/5 flex items-center justify-between shrink-0">
           <span className="text-[11px] font-mono text-white/30 flex items-center gap-2 uppercase tracking-widest">
             <History className="h-3.5 w-3.5" />
-            Session History
+            ប្រវត្តិការបង្កើត
           </span>
           <Badge variant="outline" className="font-mono text-[10px] border-white/10 text-white/30">
             {history.length}
@@ -439,7 +488,7 @@ export default function Studio() {
             {history.length === 0 ? (
               <div className="text-center py-24 text-white/20">
                 <Activity className="h-7 w-7 mx-auto mb-3 opacity-30" />
-                <p className="text-xs font-mono">No generations yet</p>
+                <p className="text-xs font-mono">មិនទាន់មានការបង្កើតនៅឡើយ</p>
               </div>
             ) : (
               history.map((item) => {
@@ -490,7 +539,7 @@ function ReferenceAudioUpload({
   return (
     <div>
       <Label className="text-[11px] font-mono text-white/30 uppercase tracking-widest mb-2 block">
-        Reference Audio
+        សំឡេងយោង
       </Label>
       {file ? (
         <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/10 bg-white/3">
@@ -523,8 +572,8 @@ function ReferenceAudioUpload({
         >
           <Upload className="h-5 w-5 text-white/30" />
           <div className="text-center">
-            <p className="text-xs text-white/50">Drop audio file or click to browse</p>
-            <p className="text-[10px] text-white/25 mt-0.5">WAV, MP3, FLAC, M4A</p>
+            <p className="text-xs text-white/50">ទម្លាក់ឯកសារ ឬចុចដើម្បីរក</p>
+            <p className="text-[10px] text-white/25 mt-0.5">WAV · MP3 · FLAC · M4A</p>
           </div>
         </div>
       )}
