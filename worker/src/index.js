@@ -268,14 +268,29 @@ async function gradioGenerate(textInput, controlInstruction = "", refFileUrl = n
   if (!sseResp.ok) throw new Error(`SSE stream failed: ${sseResp.status}`);
 
   const text = await sseResp.text();
-  const dataLine = text.split("\n").find((l) => l.startsWith("data:"));
-  if (!dataLine) throw new Error("No data in SSE response");
+  const lines = text.split("\n");
+  let eventType = null, dataStr = null, audioUrl = null;
 
-  const parsed = JSON.parse(dataLine.slice(5).trim());
-  const filePath = parsed?.[0]?.path || parsed?.[0]?.value || parsed?.[0];
-  if (!filePath) throw new Error("No audio path in Gradio response");
+  for (const line of lines) {
+    if (line.startsWith("event: ")) {
+      eventType = line.slice(7).trim();
+    } else if (line.startsWith("data: ")) {
+      dataStr = line.slice(6).trim();
+    } else if (line === "") {
+      if (eventType === "complete" && dataStr) {
+        const parsed = JSON.parse(dataStr);
+        const url = parsed?.[0]?.url;
+        if (url) { audioUrl = url; break; }
+      } else if (eventType === "error") {
+        throw new Error(`Gradio error: ${dataStr ?? "unknown"}`);
+      }
+      eventType = null;
+      dataStr = null;
+    }
+  }
 
-  return `${HF_SPACE}/gradio_api/file=${filePath}`;
+  if (!audioUrl) throw new Error("No audio URL in Gradio complete event");
+  return audioUrl;
 }
 
 // ── Download Telegram file URL ────────────────────────────────────────────────
