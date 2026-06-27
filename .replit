@@ -18,35 +18,18 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "API Server"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Start application"
+args = "Deploy Worker"
 
 [[workflows.workflow]]
-name = "API Server"
+name = "Deploy Worker"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "PORT=3000 pnpm --filter @workspace/api-server run dev"
-waitForPort = 3000
+args = "cd worker && CLOUDFLARE_API_TOKEN=$CF_API_TOKEN npx wrangler deploy"
 
 [workflows.workflow.metadata]
 outputType = "console"
-
-[[workflows.workflow]]
-name = "Start application"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "PORT=5000 BASE_PATH=/ API_PORT=3000 pnpm --filter @workspace/tts-ui run dev"
-waitForPort = 5000
-
-[workflows.workflow.metadata]
-outputType = "webview"
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
