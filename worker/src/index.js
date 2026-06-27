@@ -191,31 +191,22 @@ function wavToOggOpus(wavBuffer) {
   return monoToOggOpus(pcm, info.sampleRate);
 }
 
-// Convert any audio URL to OGG Opus.
-// The Worker downloads the audio bytes itself (has direct HF access), then
-// POSTs the raw bytes to the Replit API server's ffmpeg /api/convert endpoint
-// for MP3. WAV is handled locally without any external call.
-async function audioUrlToOggOpus(audioUrl, env) {
+// Fetch audio from HuggingFace and return { bytes, mimeType }.
+// WAV is converted to OGG Opus locally (Telegram doesn't accept WAV).
+// MP3/M4A are passed through as-is — Telegram's sendVoice accepts them natively.
+async function fetchAudioForVoice(audioUrl) {
   const audioResp = await fetch(audioUrl);
   if (!audioResp.ok) throw new Error(`Audio fetch failed: ${audioResp.status}`);
   const audioBuffer = await audioResp.arrayBuffer();
 
   const fmt = detectAudioFormat(audioBuffer);
   if (fmt === "wav") {
-    return wavToOggOpus(audioBuffer);
+    // WAV is not accepted by Telegram — convert to OGG Opus locally
+    return { bytes: wavToOggOpus(audioBuffer), mimeType: "audio/ogg", filename: "voice.ogg" };
   }
 
-  // MP3 (or unknown): POST raw bytes to the API server, get OGG Opus back
-  const convertResp = await fetch(`${env.API_BASE_URL}/api/convert`, {
-    method: "POST",
-    headers: { "Content-Type": "audio/mpeg" },
-    body: audioBuffer,
-  });
-  if (!convertResp.ok) {
-    const msg = await convertResp.text().catch(() => convertResp.status);
-    throw new Error(`Convert failed: ${msg}`);
-  }
-  return new Uint8Array(await convertResp.arrayBuffer());
+  // MP3 (and M4A): Telegram's sendVoice accepts these natively — no conversion needed
+  return { bytes: new Uint8Array(audioBuffer), mimeType: "audio/mpeg", filename: "voice.mp3" };
 }
 
 // ── Telegram helpers ──────────────────────────────────────────────────────────
@@ -247,14 +238,13 @@ async function answerCallback(env, callback_query_id, text = "") {
 }
 
 async function sendVoice(env, chat_id, audioUrl, caption, extra = {}) {
-  // Always produce OGG Opus — converts via ffmpeg for MP3, locally for WAV
-  const oggBytes = await audioUrlToOggOpus(audioUrl, env);
+  const { bytes, mimeType, filename } = await fetchAudioForVoice(audioUrl);
 
   const form = new FormData();
   form.append("chat_id", String(chat_id));
   form.append("caption", caption);
   form.append("parse_mode", "Markdown");
-  form.append("voice", new Blob([oggBytes], { type: "audio/ogg" }), "voice.ogg");
+  form.append("voice", new Blob([bytes], { type: mimeType }), filename);
   if (extra.reply_markup) {
     form.append("reply_markup", JSON.stringify(extra.reply_markup));
   }

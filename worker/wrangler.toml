@@ -4,9 +4,6 @@ compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 account_id = "d8849271816bf8825908efa8edc58162"
 
-[vars]
-API_BASE_URL = "https://447382de-df4f-4632-a66b-f1155832f75c-00-3vuqb8iw29r7a.sisko.replit.dev"
-
 [[kv_namespaces]]
 binding = "BOT_KV"
 id = "5e0fc5717c684f97b17f0e184ad962dc"
