@@ -59,7 +59,7 @@ const MAIN_MENU_KB = {
 };
 
 const BACK_KB = {
-  inline_keyboard: [[{ text: "🔙 ត្រឡប់ Menu", callback_data: "back_menu" }]],
+  inline_keyboard: [[{ text: "Back", callback_data: "back_menu", icon_custom_emoji_id: "5877629862306385808" }]],
 };
 
 const AFTER_AUDIO_KB = {

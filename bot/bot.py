@@ -52,7 +52,7 @@ def main_menu_keyboard():
 
 def back_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔙 ត្រឡប់ Menu", callback_data="back_menu")],
+        [InlineKeyboardButton("Back", callback_data="back_menu", icon_custom_emoji_id="5877629862306385808")],
     ])
 
 
@@ -194,7 +194,7 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🌍 *30 Languages:* EN, KH, ZH, JA, KO, FR, DE, AR, VI, TH ...",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 ត្រឡប់ Menu", callback_data="back_menu")],
+            [InlineKeyboardButton("Back", callback_data="back_menu", icon_custom_emoji_id="5877629862306385808")],
         ]),
     )
     return SELECT_MODE
