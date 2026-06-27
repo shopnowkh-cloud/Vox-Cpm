@@ -119,7 +119,6 @@ const MAIN_MENU_KB = {
     [{ text: "🎨 Voice Design", callback_data: "mode_design" }],
     [{ text: "🎛️ Controllable Cloning", callback_data: "mode_control" }],
     [{ text: "🎙️ Voice Cloning", callback_data: "mode_clone" }],
-    [{ text: "❓ Help", callback_data: "help" }],
   ],
 };
 
