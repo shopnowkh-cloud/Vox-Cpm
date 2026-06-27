@@ -26,16 +26,18 @@ async function answerCallback(env, callback_query_id, text = "") {
 }
 
 async function sendVoice(env, chat_id, audioUrl, caption, extra = {}) {
-  const audioResp = await fetch(audioUrl);
-  if (!audioResp.ok) throw new Error(`Audio fetch failed: ${audioResp.status}`);
-  const audioBytes = await audioResp.arrayBuffer();
+  // Step 1: Convert WAV → OGG Opus via Replit converter service
+  const convertUrl = `${env.CONVERTER_URL}/convert?url=${encodeURIComponent(audioUrl)}`;
+  const convertResp = await fetch(convertUrl);
+  if (!convertResp.ok) throw new Error(`Converter failed: ${convertResp.status}`);
+  const oggBytes = await convertResp.arrayBuffer();
 
+  // Step 2: Upload OGG Opus to Telegram as voice message
   const form = new FormData();
   form.append("chat_id", String(chat_id));
   form.append("caption", caption);
   form.append("parse_mode", "Markdown");
-  // Send WAV bytes labeled as audio/ogg — Telegram accepts and plays as voice bubble
-  form.append("voice", new Blob([audioBytes], { type: "audio/ogg" }), "voice.ogg");
+  form.append("voice", new Blob([oggBytes], { type: "audio/ogg" }), "voice.ogg");
   if (extra.reply_markup) {
     form.append("reply_markup", JSON.stringify(extra.reply_markup));
   }
@@ -44,23 +46,7 @@ async function sendVoice(env, chat_id, audioUrl, caption, extra = {}) {
     method: "POST",
     body: form,
   });
-  const result = await r.json();
-
-  // Fallback to sendAudio if Telegram rejects voice format
-  if (!result.ok) {
-    const form2 = new FormData();
-    form2.append("chat_id", String(chat_id));
-    form2.append("caption", caption);
-    form2.append("parse_mode", "Markdown");
-    form2.append("audio", new Blob([audioBytes], { type: "audio/wav" }), "audio.wav");
-    if (extra.reply_markup) form2.append("reply_markup", JSON.stringify(extra.reply_markup));
-    const r2 = await fetch(`${TG_API}/bot${env.BOT_TOKEN}/sendAudio`, {
-      method: "POST",
-      body: form2,
-    });
-    return r2.json();
-  }
-  return result;
+  return r.json();
 }
 
 // ── Keyboards ─────────────────────────────────────────────────────────────────
