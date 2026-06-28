@@ -1,45 +1,40 @@
-# [Project name]
+# VoxCPM2 Telegram Bot
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Telegram TTS Bot powered by VoxCPM2, running entirely on Cloudflare Worker. Replit is used only for editing code and deploying to Cloudflare.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- **Deploy:** Run workflow **"Deploy to Cloudflare"** after every code change
+- **Set/update secrets on Cloudflare:** `cd worker && echo "<value>" | CLOUDFLARE_API_TOKEN=$CF_API_TOKEN ./node_modules/.bin/wrangler secret put <KEY>`
+- **Install worker deps (first time):** `cd worker && npm install`
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Cloudflare Worker (JavaScript) — `worker/src/index.js`
+- Telegram Bot API (webhook mode)
+- HuggingFace Gradio Space (`OpenBMB/VoxCPM-Demo`) for TTS inference
+- Cloudflare KV (`BOT_KV`) for user state storage
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `worker/src/index.js` — all bot logic (webhook handler, TTS, audio conversion)
+- `worker/wrangler.toml` — Cloudflare Worker config (account ID, KV binding)
+- `bot/bot.py` — legacy Python bot (not in use; CF Worker is the active bot)
+- `VoxCPM/` — Python model source (reference only)
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Bot runs as a Cloudflare Worker (serverless, no Replit server needed)
+- Webhook mode: Telegram pushes updates to `https://voxcpm2-bot.limsovannrady9mm.workers.dev`
+- Audio is converted WAV→OGG Opus inside the Worker using `opusscript`
 
-## Product
+## Secrets
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- `CF_API_TOKEN` — Replit secret, used by wrangler to deploy
+- `BOT_TOKEN` — Cloudflare Worker secret (set via wrangler, not Replit)
+- `BOT_KV` — Cloudflare KV namespace binding
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
-
-## Gotchas
-
-_Populate as you build — sharp edges, "always run X before Y" rules._
-
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- Replit is edit + deploy only; no web server runs on Replit
+- Always deploy via "Deploy to Cloudflare" workflow after edits
