@@ -24,7 +24,7 @@ description: How this project is structured — Cloudflare runs the bot, Replit 
 ## Secrets
 
 - `CF_API_TOKEN` — stored in Replit secrets, used for wrangler deploy
-- `BOT_TOKEN` — stored in Cloudflare Worker environment secrets (not Replit)
+- `BOT_TOKEN` — stored in Cloudflare Worker environment secrets (not Replit). To update: `cd worker && echo "<token>" | CLOUDFLARE_API_TOKEN=$CF_API_TOKEN ./node_modules/.bin/wrangler secret put BOT_TOKEN` (run `npm install` in worker/ first if node_modules missing)
 - `BOT_KV` — KV binding for user state storage
 
 ## Gradio error fix

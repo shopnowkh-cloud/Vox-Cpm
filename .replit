@@ -22,10 +22,6 @@ timeoutMs = 20000
 
 [userenv.shared]
 CLOUDFLARE_ACCOUNT_ID = "d8849271816bf8825908efa8edc58162"
-PORT = "5000"
-BASE_PATH = "/"
-NODE_ENV = "development"
-API_PORT = "3000"
 
 [[ports]]
 localPort = 5000
