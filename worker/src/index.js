@@ -542,9 +542,7 @@ async function processUpdate(env, update) {
   // ── Controllable: waiting for text ─────────────────────────────────────────
   if (state.step === "control_text" && text) {
     const control = state.style || "";
-    const status = await sendMessage(env, chatId,
-      `⏳ *Controllable Cloning*\n🎛️ \`${control}\`\nកំពុង generate...`
-    );
+    const status = await sendSticker(env, chatId, "CAACAgUAAxkBAAEDu4Zp-rTrlmnphDX-WIT9au-O6aW5CwACLRYAAvgG8VSjN2gKlvlMQTsE");
     try {
       const audioUrl = await gradioGenerate(text, control);
       await sendVoice(env, chatId, audioUrl, "", {});
@@ -586,9 +584,7 @@ async function processUpdate(env, update) {
   // ── Voice Clone: waiting for text ──────────────────────────────────────────
   if (state.step === "clone_text" && text) {
     const fileUrl = state.fileUrl;
-    const status = await sendMessage(env, chatId,
-      "⏳ *Voice Cloning* — កំពុង clone ហើយ generate..."
-    );
+    const status = await sendSticker(env, chatId, "CAACAgUAAxkBAAEDu4Zp-rTrlmnphDX-WIT9au-O6aW5CwACLRYAAvgG8VSjN2gKlvlMQTsE");
     try {
       const audioUrl = await gradioGenerate(text, "", fileUrl);
       await sendVoice(env, chatId, audioUrl, "", {});
