@@ -451,7 +451,7 @@ async function processUpdate(env, update) {
       await setState(env, userId, { step: "design_text" });
       await editMessage(env, chatId, msgId,
         "🎨 *Voice Design*\n\n" +
-        "សរសេរ text ដែលចង់ generate audio:\n\n" +
+        "សរសេរអក្សរដែលអ្នកចង់បង្កើតសំឡេង:\n\n" +
         "✏️ ឧទាហរណ៍:\n" +
         "• `Hello, how are you today?`\n" +
         "• `ស្វាគមន៍មកកាន់ VoxCPM2`\n" +
