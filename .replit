@@ -24,12 +24,12 @@ args = "Deploy to Cloudflare"
 name = "Deploy to Cloudflare"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "cd worker && ./node_modules/.bin/wrangler deploy"
-
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd worker && CLOUDFLARE_API_TOKEN=$CF_API_TOKEN ./node_modules/.bin/wrangler deploy"
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
