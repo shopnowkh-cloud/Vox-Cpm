@@ -270,6 +270,13 @@ const BACK_KB = {
   inline_keyboard: [[{ text: "Back", callback_data: "back_menu", icon_custom_emoji_id: "5877629862306385808" }]],
 };
 
+const SKIP_BACK_KB = {
+  inline_keyboard: [
+    [{ text: "⏭️ Skip (no control)", callback_data: "skip_control" }],
+    [{ text: "Back", callback_data: "back_menu", icon_custom_emoji_id: "5877629862306385808" }],
+  ],
+};
+
 const AFTER_AUDIO_KB = {
   inline_keyboard: [
     [{ text: "🔄 Generate Again", callback_data: "back_menu" }],
@@ -447,24 +454,10 @@ async function processUpdate(env, update) {
     }
 
     if (data === "mode_design") {
-      await setState(env, userId, { step: "design_text" });
+      await setState(env, userId, { step: "design_style" });
       await editMessage(env, chatId, msgId,
         "🎨 *Voice Design*\n\n" +
-        "សរសេរអក្សរដែលអ្នកចង់បង្កើតសំឡេង:\n\n" +
-        "✏️ ឧទាហរណ៍:\n" +
-        "• `Hello, how are you today?`\n" +
-        "• `ស្វាគមន៍មកកាន់ VoxCPM2`\n" +
-        "• `你好，欢迎使用语音合成！`",
-        { reply_markup: BACK_KB }
-      );
-      return;
-    }
-
-    if (data === "mode_control") {
-      await setState(env, userId, { step: "control_style" });
-      await editMessage(env, chatId, msgId,
-        "🎛️ *Controllable Cloning*\n\n" +
-        "*ជំហាន 1:* ពណ៌នា style សំឡេង\n\n" +
+        "ជំហានទី 1: ពណ៌នាសំឡេងដែលអ្នកចង់បង្កើត:\n\n" +
         "✏️ ឧទាហរណ៍:\n" +
         "• `young woman, soft and gentle`\n" +
         "• `old man, deep serious voice`\n" +
@@ -473,6 +466,31 @@ async function processUpdate(env, update) {
         "• `年轻女性，温柔甜美`",
         { reply_markup: BACK_KB }
       );
+      return;
+    }
+
+    if (data === "mode_control") {
+      await setState(env, userId, { step: "control_audio" });
+      await editMessage(env, chatId, msgId,
+        "🎛️ *Controllable Cloning*\n\n" +
+        "ជំហានទី 1: ផ្ញើសំឡេង reference មកទីនេះ:\n\n" +
+        "💡 Model នឹង clone timbre (ពណ៌សំឡេង) របស់ audio នោះ\n" +
+        "ហើយប្រើ Control Instruction ដើម្បី guide emotion/style",
+        { reply_markup: BACK_KB }
+      );
+      return;
+    }
+
+    if (data === "skip_control") {
+      const state = await getState(env, userId);
+      if (state.step === "control_style") {
+        await setState(env, userId, { step: "control_text", style: "", fileUrl: state.fileUrl });
+        await sendMessage(env, chatId,
+          "⏭️ *គ្មាន Control Instruction*\n\n" +
+          "ជំហានទី 3: សរសេរអក្សរដែលអ្នកចង់បង្កើតសំឡេង:",
+          { reply_markup: BACK_KB }
+        );
+      }
       return;
     }
 
@@ -518,13 +536,25 @@ async function processUpdate(env, update) {
 
   const state = await getState(env, userId);
 
-  // ── Voice Design: waiting for text ─────────────────────────────────────────
+  // ── Voice Design: waiting for control instruction ──────────────────────────
+  if (state.step === "design_style" && text) {
+    await setState(env, userId, { step: "design_text", style: text });
+    await sendMessage(env, chatId,
+      `✅ *Voice style:* \`${text}\`\n\n` +
+      "ជំហានទី 2: សរសេរអក្សរដែលអ្នកចង់បង្កើតសំឡេង:",
+      { reply_markup: BACK_KB }
+    );
+    return;
+  }
+
+  // ── Voice Design: waiting for target text ──────────────────────────────────
   if (state.step === "design_text" && text) {
+    const style = state.style || "";
     const status = await sendSticker(env, chatId,
       "CAACAgUAAxkBAAEDu4Zp-rTrlmnphDX-WIT9au-O6aW5CwACLRYAAvgG8VSjN2gKlvlMQTsE"
     );
     try {
-      const audioUrl = await gradioGenerate(text);
+      const audioUrl = await gradioGenerate(text, style);
       await sendVoice(env, chatId, audioUrl, "", {});
       await sendMessage(env, chatId,
         "👋 ស្វាគមន៍មកកាន់ VoxCPM2 Bot!\n\n🌍 AI Text-to-Speech — 30 ភាសា\nជ្រើសរើស មុខងារ ដែលចង់ប្រើ:",
@@ -538,23 +568,48 @@ async function processUpdate(env, update) {
     return;
   }
 
-  // ── Controllable: waiting for style ────────────────────────────────────────
-  if (state.step === "control_style" && text) {
-    await setState(env, userId, { step: "control_text", style: text });
+  // ── Controllable: waiting for reference audio ───────────────────────────────
+  if (state.step === "control_audio") {
+    const audioEnt = msg.voice || msg.audio ||
+      (msg.document?.mime_type?.includes("audio") ? msg.document : null);
+    if (!audioEnt) {
+      await sendMessage(env, chatId,
+        "⚠️ សូម upload *voice message* ឬ *audio file*!",
+        { reply_markup: BACK_KB }
+      );
+      return;
+    }
+    const fileUrl = await getTgFileUrl(env, audioEnt.file_id);
+    await setState(env, userId, { step: "control_style", fileUrl });
     await sendMessage(env, chatId,
-      `✅ Style: \`${text}\`\n\n` +
-      "*ជំហាន 2:* ឥឡូវសរសេរ text ដែលចង់ generate:",
+      "✅ *Audio received!*\n\n" +
+      "ជំហានទី 2: ពណ៌នា style/emotion ដែលចង់បន្ថែម (ឬ Skip):\n\n" +
+      "✏️ ឧទាហរណ៍:\n" +
+      "• `excited, fast paced`\n" +
+      "• `sad and slow`\n" +
+      "• `ស្ងប់ស្ងាត់, ការអប់រំ`",
+      { reply_markup: SKIP_BACK_KB }
+    );
+    return;
+  }
+
+  // ── Controllable: waiting for control instruction ───────────────────────────
+  if (state.step === "control_style" && text) {
+    await setState(env, userId, { step: "control_text", style: text, fileUrl: state.fileUrl });
+    await sendMessage(env, chatId,
+      `✅ *Control:* \`${text}\`\n\n` +
+      "ជំហានទី 3: សរសេរអក្សរដែលអ្នកចង់បង្កើតសំឡេង:",
       { reply_markup: BACK_KB }
     );
     return;
   }
 
-  // ── Controllable: waiting for text ─────────────────────────────────────────
+  // ── Controllable: waiting for target text ──────────────────────────────────
   if (state.step === "control_text" && text) {
-    const control = state.style || "";
+    const { style = "", fileUrl } = state;
     const status = await sendSticker(env, chatId, "CAACAgUAAxkBAAEDu4Zp-rTrlmnphDX-WIT9au-O6aW5CwACLRYAAvgG8VSjN2gKlvlMQTsE");
     try {
-      const audioUrl = await gradioGenerate(text, control);
+      const audioUrl = await gradioGenerate(text, style, fileUrl);
       await sendVoice(env, chatId, audioUrl, "", {});
       await sendMessage(env, chatId,
         "👋 ស្វាគមន៍មកកាន់ VoxCPM2 Bot!\n\n🌍 AI Text-to-Speech — 30 ភាសា\nជ្រើសរើស មុខងារ ដែលចង់ប្រើ:",
