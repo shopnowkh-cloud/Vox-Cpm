@@ -262,6 +262,7 @@ const MAIN_MENU_KB = {
     [{ text: "🎨 Voice Design", callback_data: "mode_design" }],
     [{ text: "🎛️ Controllable Cloning", callback_data: "mode_control" }],
     [{ text: "🎙️ Voice Cloning", callback_data: "mode_clone" }],
+    [{ text: "✨ Ultimate Cloning", callback_data: "mode_ultimate" }],
   ],
 };
 
@@ -299,14 +300,14 @@ async function wakeUpSpace() {
   } catch (_) {}
 }
 
-async function gradioGenerateOnce(textInput, controlInstruction, uploadedFilePath) {
+async function gradioGenerateOnce(textInput, controlInstruction, uploadedFilePath, usePromptText = false, promptText = "") {
   const payload = {
     data: [
       textInput,
-      controlInstruction,
+      usePromptText ? "" : controlInstruction,
       uploadedFilePath ? { path: uploadedFilePath, meta: { _type: "gradio.FileData" }, orig_name: "reference.ogg" } : null,
-      false,
-      "",
+      usePromptText,
+      usePromptText ? promptText : "",
       2.0,
       false,
       false,
@@ -360,7 +361,7 @@ async function gradioGenerateOnce(textInput, controlInstruction, uploadedFilePat
   return audioUrl;
 }
 
-async function gradioGenerate(textInput, controlInstruction = "", refFileUrl = null) {
+async function gradioGenerate(textInput, controlInstruction = "", refFileUrl = null, usePromptText = false, promptText = "") {
   let uploadedFilePath = null;
 
   if (refFileUrl) {
@@ -383,14 +384,12 @@ async function gradioGenerate(textInput, controlInstruction = "", refFileUrl = n
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       if (attempt > 1) {
-        // Wake up the space and wait before retrying
         await wakeUpSpace();
         await new Promise((r) => setTimeout(r, 3000 * attempt));
       }
-      return await gradioGenerateOnce(textInput, controlInstruction, uploadedFilePath);
+      return await gradioGenerateOnce(textInput, controlInstruction, uploadedFilePath, usePromptText, promptText);
     } catch (err) {
       lastError = err;
-      // Only retry on Space-level errors (null data), not on bad input errors
       const msg = err?.message ?? "";
       const isRetryable = msg.includes("HuggingFace Space error") || msg.includes("SSE stream failed") || msg.includes("init failed");
       if (!isRetryable) throw err;
@@ -482,6 +481,17 @@ async function processUpdate(env, update) {
       await editMessage(env, chatId, msgId,
         "🎙️ *Voice Cloning*\n\n" +
         "ផ្ញើសំឡេងមកទីនេះដែលអ្នកចង់ក្លូន:",
+        { reply_markup: BACK_KB }
+      );
+      return;
+    }
+
+    if (data === "mode_ultimate") {
+      await setState(env, userId, { step: "ultimate_audio" });
+      await editMessage(env, chatId, msgId,
+        "✨ *Ultimate Cloning*\n\n" +
+        "ផ្ញើសំឡេង reference មកទីនេះ:\n\n" +
+        "💡 សំឡេង reference នឹងត្រូវបានប្រើជា prefix — model នឹង continue សំឡេងនោះ",
         { reply_markup: BACK_KB }
       );
       return;
@@ -587,6 +597,59 @@ async function processUpdate(env, update) {
     const status = await sendSticker(env, chatId, "CAACAgUAAxkBAAEDu4Zp-rTrlmnphDX-WIT9au-O6aW5CwACLRYAAvgG8VSjN2gKlvlMQTsE");
     try {
       const audioUrl = await gradioGenerate(text, "", fileUrl);
+      await sendVoice(env, chatId, audioUrl, "", {});
+      await sendMessage(env, chatId,
+        "👋 ស្វាគមន៍មកកាន់ VoxCPM2 Bot!\n\n🌍 AI Text-to-Speech — 30 ភាសា\nជ្រើសរើស មុខងារ ដែលចង់ប្រើ:",
+        { reply_markup: MAIN_MENU_KB }
+      );
+    } catch (e) {
+      await sendMessage(env, chatId, `❌ Error: ${e.message}`, { reply_markup: BACK_KB });
+    }
+    await tg(env, "deleteMessage", { chat_id: chatId, message_id: status.result?.message_id }).catch(() => {});
+    await clearState(env, userId);
+    return;
+  }
+
+  // ── Ultimate Cloning: waiting for reference audio ───────────────────────────
+  if (state.step === "ultimate_audio") {
+    const audioEnt = msg.voice || msg.audio ||
+      (msg.document?.mime_type?.includes("audio") ? msg.document : null);
+    if (!audioEnt) {
+      await sendMessage(env, chatId,
+        "⚠️ សូម upload *voice message* ឬ *audio file*!",
+        { reply_markup: BACK_KB }
+      );
+      return;
+    }
+    const fileUrl = await getTgFileUrl(env, audioEnt.file_id);
+    await setState(env, userId, { step: "ultimate_transcript", fileUrl });
+    await sendMessage(env, chatId,
+      "✅ *Audio received!*\n\n" +
+      "ជំហានទី 2: សរសេរអត្ថបទ (transcript) នៃសំឡេង reference:\n\n" +
+      "📝 វាយអត្ថបទដែលនិយាយក្នុងសំឡេងនោះ\n" +
+      "ឧទាហរណ៍: `Hello, this is my reference audio.`",
+      { reply_markup: BACK_KB }
+    );
+    return;
+  }
+
+  // ── Ultimate Cloning: waiting for transcript ────────────────────────────────
+  if (state.step === "ultimate_transcript" && text) {
+    await setState(env, userId, { step: "ultimate_text", fileUrl: state.fileUrl, transcript: text });
+    await sendMessage(env, chatId,
+      `✅ *Transcript:* \`${text}\`\n\n` +
+      "ជំហានទី 3: សរសេរអក្សរដែលអ្នកចង់បង្កើតសំឡេង:",
+      { reply_markup: BACK_KB }
+    );
+    return;
+  }
+
+  // ── Ultimate Cloning: waiting for target text ───────────────────────────────
+  if (state.step === "ultimate_text" && text) {
+    const { fileUrl, transcript } = state;
+    const status = await sendSticker(env, chatId, "CAACAgUAAxkBAAEDu4Zp-rTrlmnphDX-WIT9au-O6aW5CwACLRYAAvgG8VSjN2gKlvlMQTsE");
+    try {
+      const audioUrl = await gradioGenerate(text, "", fileUrl, true, transcript);
       await sendVoice(env, chatId, audioUrl, "", {});
       await sendMessage(env, chatId,
         "👋 ស្វាគមន៍មកកាន់ VoxCPM2 Bot!\n\n🌍 AI Text-to-Speech — 30 ភាសា\nជ្រើសរើស មុខងារ ដែលចង់ប្រើ:",
