@@ -481,11 +481,7 @@ async function processUpdate(env, update) {
       await setState(env, userId, { step: "clone_audio" });
       await editMessage(env, chatId, msgId,
         "🎙️ *Voice Cloning*\n\n" +
-        "*ជំហាន 1:* ផ្ញើ voice message ឬ audio file\n" +
-        "ដែលចង់ clone សំឡេង\n\n" +
-        "💡 Tips:\n" +
-        "• Audio ច្បាស់ = clone ល្អ\n" +
-        "• យ៉ាងតិច 3-10 វិនាទី",
+        "ផ្ញើសំឡេងមកទីនេះដែលអ្នកចង់ក្លូន:",
         { reply_markup: BACK_KB }
       );
       return;
